@@ -29,10 +29,14 @@ namespace AnyBase.Net
         public IReadOnlyList<TBase> Identity { get; }
 
         /// <summary>
-        /// Gets or sets the size utilized in encoding or decoding operations within the numeral system.
+        /// Gets or sets the size used for encoding and decoding operations.
         /// </summary>
         /// <remarks>
-        /// The Size property is critical for determining the length of encoded numerals in the numeral system processing.
+        /// The size property determines the grouping of indices for encoding and decoding processes.
+        /// It influences how the numeral representations are adjusted and grouped during encoding transformations.
+        /// Proper setting of this property is crucial for ensuring accurate translation between encoded data
+        /// and its original byte or string forms.
+        /// </remarks>
         public int Size { get; set; }
 
         /// <summary>
@@ -59,8 +63,8 @@ namespace AnyBase.Net
         public TBase[] Encode(byte[] bytes)
         {
             var indices = bytes.Select(b => (int)b).ToList();
-            var numerals = indices.Select(x => _stringSystem[x]).ToArray();
-            var encodedNumerals = numerals.Select(x => AdjustSize(x.To(NumeralSystem), Size)).ToArray();
+            var numerals = indices.Select(x => NumeralSystem[x]).ToArray();
+            var encodedNumerals = numerals.Select(x => AdjustSize(x, Size)).ToArray();
             var output = encodedNumerals.Select(x => x.IntegralIndices.Select(y => Identity[y])).SelectMany(x => x).ToArray();
             return output;
         }
@@ -74,8 +78,8 @@ namespace AnyBase.Net
         {
             var chars = bytes.ToCharArray();
             var indices = chars.Select(b => (int)b).ToList();
-            var numerals = indices.Select(x => _stringSystem[x]).ToArray();
-            var encodedNumerals = numerals.Select(x => AdjustSize(x.To(NumeralSystem), Size)).ToArray();
+            var numerals = indices.Select(x => NumeralSystem[x]).ToArray();
+            var encodedNumerals = numerals.Select(x => AdjustSize(x, Size)).ToArray();
             var output = encodedNumerals.Select(x => x.IntegralIndices.Select(y => Identity[y])).SelectMany(x => x).ToArray();
             return output;
         }
@@ -205,7 +209,7 @@ namespace AnyBase.Net
             if (identity.Count == 0) throw new ArgumentException("Identity cannot be empty.");
             Identity = identity.ToList();
             NumeralSystem = Numeral.System.OfBase(Identity.Count);
-            Size = NumeralSystem.Size;
+            Size = NumeralSystem.Length;
         }
         
     }
