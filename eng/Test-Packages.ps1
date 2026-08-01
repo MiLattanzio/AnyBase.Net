@@ -111,9 +111,9 @@ Console.Write(hexadecimal.EncodeToString("A"));
         '--no-cache'
     )
 
-    $isWindows = [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    $runningOnWindows = [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [Runtime.InteropServices.OSPlatform]::Windows)
-    $toolName = if ($isWindows) { 'anybase.exe' } else { 'anybase' }
+    $toolName = if ($runningOnWindows) { 'anybase.exe' } else { 'anybase' }
     $toolPath = Join-Path $toolDirectory $toolName
     $toolOutput = (& $toolPath encode A --base 16 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $toolOutput -ne '41') {
