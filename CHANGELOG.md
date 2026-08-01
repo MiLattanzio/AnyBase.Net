@@ -4,7 +4,7 @@ Le modifiche rilevanti di AnyBase.Net sono documentate in questo file.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/)
 e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 
-## [1.1.1] - Unreleased
+## [1.1.1] - 2026-08-02
 
 ### Added
 
@@ -39,5 +39,5 @@ e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 - Aggiornamento a NumeralSystems.Net 5.3.0.
 - Round-trip UTF-8, alfabeti ordinati deterministici e validazione più rigorosa.
 
-[1.1.1]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.0...HEAD
+[1.1.1]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/MiLattanzio/AnyBase.Net/releases/tag/v1.1.0
