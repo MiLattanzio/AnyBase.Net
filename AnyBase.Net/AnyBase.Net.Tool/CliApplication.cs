@@ -3,11 +3,28 @@ using System.Text;
 
 namespace AnyBase.Net.Tool;
 
+/// <summary>
+/// Parses command-line arguments and runs AnyBase.Net text transformations.
+/// </summary>
 public static class CliApplication
 {
     private const string DefaultAlphabet =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
 
+    /// <summary>
+    /// Runs the command-line application using the supplied streams.
+    /// </summary>
+    /// <param name="args">The command-line arguments.</param>
+    /// <param name="standardInput">The redirected input, or <see langword="null"/> when unavailable.</param>
+    /// <param name="standardOutput">The destination for successful output.</param>
+    /// <param name="standardError">The destination for diagnostics.</param>
+    /// <param name="cancellationToken">A token used to cancel file and stream operations.</param>
+    /// <returns>Zero on success, or two for invalid input and operational errors.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="args"/>, <paramref name="standardOutput"/>, or
+    /// <paramref name="standardError"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     public static async Task<int> RunAsync(
         string[] args,
         TextReader? standardInput,

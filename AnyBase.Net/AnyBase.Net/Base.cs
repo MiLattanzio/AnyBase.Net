@@ -29,6 +29,9 @@ namespace AnyBase.Net
         /// The value can be increased to add leading zero symbols, but cannot be lower
         /// than the number of digits needed to represent a byte in the selected base.
         /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is smaller than the minimum required to represent a byte.
+        /// </exception>
         public int Size
         {
             get => _size;
@@ -58,6 +61,11 @@ namespace AnyBase.Net
         /// This overload is retained for compatibility. Prefer the enumerable overload
         /// when the alphabet order must be explicit.
         /// </remarks>
+        /// <param name="identity">The alphabet symbols.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="identity"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">
+        /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
+        /// </exception>
         public Base(HashSet<TBase> identity)
             : this((IEnumerable<TBase>)identity)
         {
@@ -67,6 +75,10 @@ namespace AnyBase.Net
         /// Initializes a base from symbols supplied in numeric order.
         /// </summary>
         /// <param name="identity">The ordered alphabet. At least two unique symbols are required.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="identity"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">
+        /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
+        /// </exception>
         public Base(IEnumerable<TBase> identity)
         {
             if (identity == null)
@@ -126,13 +138,25 @@ namespace AnyBase.Net
         /// <inheritdoc />
         public string EncodeToString(byte[] bytes)
         {
-            return string.Concat(Encode(bytes).Select(SymbolText));
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
+            var tokens = GetTextTokensForStringOperations();
+            return string.Concat(Encode(bytes).Select(symbol => tokens[_indices[symbol]].Text));
         }
 
         /// <inheritdoc />
         public string EncodeToString(string value)
         {
-            return string.Concat(Encode(value).Select(SymbolText));
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            var tokens = GetTextTokensForStringOperations();
+            return string.Concat(Encode(value).Select(symbol => tokens[_indices[symbol]].Text));
         }
 
         /// <inheritdoc />
@@ -143,25 +167,11 @@ namespace AnyBase.Net
                 throw new ArgumentNullException(nameof(encoded));
             }
 
+            var tokens = GetTextTokensForStringOperations();
+
             if (encoded.Length == 0)
             {
                 return string.Empty;
-            }
-
-            var tokens = Identity
-                .Select((symbol, index) => new SymbolToken(SymbolText(symbol), index))
-                .ToArray();
-
-            if (tokens.Any(token => token.Text.Length == 0))
-            {
-                throw new InvalidOperationException(
-                    "String decoding is unavailable when an identity symbol has an empty text representation.");
-            }
-
-            if (tokens.Select(token => token.Text).Distinct(StringComparer.Ordinal).Count() != tokens.Length)
-            {
-                throw new InvalidOperationException(
-                    "String decoding requires every identity symbol to have a unique text representation.");
             }
 
             var orderedTokens = tokens
@@ -178,7 +188,11 @@ namespace AnyBase.Net
 
                 if (token == null)
                 {
-                    throw new FormatException($"Unknown identity symbol at position {position}.");
+                    var previewLength = Math.Min(16, encoded.Length - position);
+                    var preview = EscapeForMessage(encoded.Substring(position, previewLength));
+                    throw new FormatException(
+                        $"Encoded text has no identity symbol matching at text position {position}. " +
+                        $"Remaining input starts with '{preview}'.");
                 }
 
                 symbols.Add(Identity[token.Index]);
@@ -191,7 +205,18 @@ namespace AnyBase.Net
         /// <inheritdoc />
         public string DecodeToString(TBase[] encoded)
         {
-            return StrictUtf8.GetString(DecodeToBytes(encoded));
+            var bytes = DecodeToBytes(encoded);
+            try
+            {
+                return StrictUtf8.GetString(bytes);
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new DecoderFallbackException(
+                    $"Decoded bytes are not valid UTF-8 at byte index {exception.Index}.",
+                    exception.BytesUnknown ?? Array.Empty<byte>(),
+                    exception.Index);
+            }
         }
 
         /// <inheritdoc />
@@ -209,7 +234,11 @@ namespace AnyBase.Net
 
             if (encoded.Length % Size != 0)
             {
-                throw new FormatException($"Encoded input length must be a multiple of {Size}.");
+                var incompleteGroupIndex = encoded.Length / Size;
+                var incompleteGroupStart = incompleteGroupIndex * Size;
+                throw new FormatException(
+                    $"Encoded symbol count {encoded.Length} must be a multiple of Size {Size}. " +
+                    $"Incomplete byte group {incompleteGroupIndex} starts at symbol index {incompleteGroupStart}.");
             }
 
             var output = new byte[encoded.Length / Size];
@@ -219,14 +248,19 @@ namespace AnyBase.Net
                 for (var offset = 0; offset < Size; offset++)
                 {
                     var symbolPosition = group * Size + offset;
-                    if (!_indices.TryGetValue(encoded[symbolPosition], out var digit))
+                    var symbol = encoded[symbolPosition];
+                    if (symbol is null || !_indices.TryGetValue(symbol, out var digit))
                     {
-                        throw new FormatException($"Unknown identity symbol at index {symbolPosition}.");
+                        throw new FormatException(
+                            $"Unknown identity symbol {DescribeSymbol(symbol!)} at symbol index {symbolPosition} " +
+                            $"(byte group {group}, offset {offset}).");
                     }
 
                     if (value > (byte.MaxValue - digit) / Identity.Count)
                     {
-                        throw new FormatException($"Encoded group at index {group} exceeds the byte range.");
+                        throw new FormatException(
+                            $"Encoded byte group {group} exceeds 255 at symbol index {symbolPosition}: " +
+                            $"accumulated value {value}, digit {digit}, base {Identity.Count}.");
                     }
 
                     value = value * Identity.Count + digit;
@@ -260,7 +294,65 @@ namespace AnyBase.Net
 
         private static string SymbolText(TBase symbol)
         {
-            return symbol.ToString() ?? string.Empty;
+            return symbol is null ? string.Empty : symbol.ToString() ?? string.Empty;
+        }
+
+        private SymbolToken[] GetTextTokensForStringOperations()
+        {
+            var tokens = Identity
+                .Select((symbol, index) => new SymbolToken(SymbolText(symbol), index))
+                .ToArray();
+
+            var empty = tokens.FirstOrDefault(token => token.Text.Length == 0);
+            if (empty != null)
+            {
+                throw new InvalidOperationException(
+                    $"Identity symbol at index {empty.Index} has an empty text representation. " +
+                    "String encoding and decoding require non-empty symbol text; use the symbol-array APIs instead.");
+            }
+
+            for (var firstIndex = 0; firstIndex < tokens.Length; firstIndex++)
+            {
+                for (var secondIndex = firstIndex + 1; secondIndex < tokens.Length; secondIndex++)
+                {
+                    var first = tokens[firstIndex];
+                    var second = tokens[secondIndex];
+                    if (string.Equals(first.Text, second.Text, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            $"Identity symbols at indices {first.Index} and {second.Index} both use the text " +
+                            $"'{EscapeForMessage(first.Text)}'. String encoding and decoding require unique symbol text; " +
+                            "use the symbol-array APIs instead.");
+                    }
+
+                    var shorter = first.Text.Length < second.Text.Length ? first : second;
+                    var longer = ReferenceEquals(shorter, first) ? second : first;
+                    if (longer.Text.StartsWith(shorter.Text, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            $"Identity symbol text '{EscapeForMessage(shorter.Text)}' at index {shorter.Index} is a prefix " +
+                            $"of '{EscapeForMessage(longer.Text)}' at index {longer.Index}. String encoding and decoding " +
+                            "require a prefix-free textual alphabet; use the symbol-array APIs instead.");
+                    }
+                }
+            }
+
+            return tokens;
+        }
+
+        private static string DescribeSymbol(TBase symbol)
+        {
+            return symbol is null ? "<null>" : $"'{EscapeForMessage(SymbolText(symbol))}'";
+        }
+
+        private static string EscapeForMessage(string value)
+        {
+            return value
+                .Replace("\\", "\\\\")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t")
+                .Replace("\0", "\\0");
         }
 
         private sealed class SymbolToken

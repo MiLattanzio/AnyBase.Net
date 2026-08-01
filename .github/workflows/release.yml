@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to rebuild (for example v1.1.0)
+        description: Existing release tag to rebuild (for example v1.1.1)
         required: true
         type: string
 
@@ -74,7 +74,7 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Pack library
+      - name: Pack and validate library API
         run: >-
           dotnet pack AnyBase.Net/AnyBase.Net/AnyBase.Net.csproj
           --configuration Release
@@ -87,6 +87,13 @@ jobs:
           --configuration Release
           --no-build
           --output artifacts/release
+
+      - name: Test packed library and CLI tool
+        shell: pwsh
+        run: >-
+          ./eng/Test-Packages.ps1
+          -PackageDirectory artifacts/release
+          -Version "${{ steps.version.outputs.version }}"
 
       - name: Build playground archive
         shell: bash

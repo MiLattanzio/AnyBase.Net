@@ -9,12 +9,13 @@ Codifica e decodifica byte o testo UTF-8 usando un alfabeto ordinato qualsiasi.
 Ogni byte è rappresentato con una larghezza fissa, quindi il round-trip è
 deterministico anche con basi non potenze di due.
 
-La versione 1.1.0 usa `NumeralSystems.Net` 5.3.0.
+La versione 1.1.1 usa `NumeralSystems.Net` 5.3.0 e verifica automaticamente
+la compatibilità dell'API pubblica con la versione 1.1.0.
 
 ## Installazione
 
 ```console
-dotnet add package AnyBase.Net --version 1.1.0
+dotnet add package AnyBase.Net --version 1.1.1
 ```
 
 ## Uso
@@ -44,9 +45,11 @@ var symbols = binary.Encode(source);
 var roundTrip = binary.DecodeToBytes(symbols);
 ```
 
-Per alfabeti in cui ogni simbolo occupa più caratteri, l'overload che riceve
-un array di simboli evita qualsiasi ambiguità. La decodifica da stringa usa il
-matching più lungo e richiede rappresentazioni testuali uniche.
+Le API testuali richiedono che le rappresentazioni dei simboli siano non vuote,
+uniche e prefix-free: per esempio, `"a"` e `"ab"` non possono essere concatenati
+e decodificati in modo sicuro. Questi alfabeti restano supportati dalle API ad
+array `Encode`, `DecodeToBytes` e `DecodeToString(TBase[])`, che mantengono i
+confini tra i simboli.
 
 ## Playground WebAssembly
 
@@ -69,7 +72,7 @@ dotnet run --project AnyBase.Net/AnyBase.Net.Playground
 Installa il .NET global tool:
 
 ```console
-dotnet tool install --global AnyBase.Net.Tool --version 1.1.0
+dotnet tool install --global AnyBase.Net.Tool --version 1.1.1
 ```
 
 Il comando installato è `anybase`:
@@ -93,10 +96,20 @@ Sono disponibili `--input <file|->`, `--output <file|->`, stdin e basi da 2 a
 dotnet restore AnyBase.Net/AnyBase.Net.sln
 dotnet build AnyBase.Net/AnyBase.Net.sln --configuration Release
 dotnet test AnyBase.Net/AnyBase.Net.sln --configuration Release
+dotnet pack AnyBase.Net/AnyBase.Net/AnyBase.Net.csproj --configuration Release --output artifacts/packages
+dotnet pack AnyBase.Net/AnyBase.Net.Tool/AnyBase.Net.Tool.csproj --configuration Release --output artifacts/packages
+# PowerShell 7 (Windows, Linux o macOS)
+pwsh ./eng/Test-Packages.ps1 -PackageDirectory artifacts/packages -Version 1.1.1
+
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File ./eng/Test-Packages.ps1 -PackageDirectory artifacts/packages -Version 1.1.1
 ```
 
 La suite copre l'intero intervallo dei byte, Unicode UTF-8, alfabeti custom,
-input malformati e il contratto della CLI.
+input malformati e il contratto della CLI. FsCheck esegue inoltre round-trip
+generativi variando byte, ordine e dimensione degli alfabeti e padding.
+
+Le modifiche di ogni versione sono raccolte nel [changelog](CHANGELOG.md).
 
 Le istruzioni per GitHub Pages e Trusted Publishing sono in
 [docs/RELEASING.md](docs/RELEASING.md).

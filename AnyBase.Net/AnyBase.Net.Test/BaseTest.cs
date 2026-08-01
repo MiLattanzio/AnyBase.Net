@@ -118,6 +118,8 @@ public class BaseTest
         {
             Assert.That(() => Hex.Encode((byte[])null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.Encode((string)null!), Throws.TypeOf<ArgumentNullException>());
+            Assert.That(() => Hex.EncodeToString((byte[])null!), Throws.TypeOf<ArgumentNullException>());
+            Assert.That(() => Hex.EncodeToString((string)null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.DecodeToBytes(null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.DecodeToString((char[])null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.DecodeToString((string)null!), Throws.TypeOf<ArgumentNullException>());
@@ -137,11 +139,35 @@ public class BaseTest
     }
 
     [Test]
+    public void DecodeErrors_ReportGroupSymbolAndTextPositions()
+    {
+        var incomplete = Assert.Throws<FormatException>(() => Hex.DecodeToBytes("4".ToCharArray()));
+        var unknownSymbol = Assert.Throws<FormatException>(() => Hex.DecodeToBytes("4G".ToCharArray()));
+        var overflow = Assert.Throws<FormatException>(() => Decimal.DecodeToBytes("999".ToCharArray()));
+        var unknownText = Assert.Throws<FormatException>(() => Hex.DecodeToString("4Z"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(incomplete!.Message, Does.Contain("symbol count 1"));
+            Assert.That(incomplete.Message, Does.Contain("byte group 0"));
+            Assert.That(incomplete.Message, Does.Contain("symbol index 0"));
+            Assert.That(unknownSymbol!.Message, Does.Contain("'G'"));
+            Assert.That(unknownSymbol.Message, Does.Contain("symbol index 1"));
+            Assert.That(unknownSymbol.Message, Does.Contain("byte group 0, offset 1"));
+            Assert.That(overflow!.Message, Does.Contain("byte group 0 exceeds 255"));
+            Assert.That(overflow.Message, Does.Contain("symbol index 2"));
+            Assert.That(unknownText!.Message, Does.Contain("text position 1"));
+            Assert.That(unknownText.Message, Does.Contain("'Z'"));
+        });
+    }
+
+    [Test]
     public void DecodeToString_RejectsInvalidUtf8()
     {
         var encoded = Binary.Encode(new byte[] { 0xFF });
+        var exception = Assert.Throws<DecoderFallbackException>(() => Binary.DecodeToString(encoded));
 
-        Assert.That(() => Binary.DecodeToString(encoded), Throws.TypeOf<DecoderFallbackException>());
+        Assert.That(exception!.Message, Does.Contain("byte index 0"));
     }
 
     [Test]
@@ -168,5 +194,48 @@ public class BaseTest
         var encoded = sut.EncodeToString(value);
 
         Assert.That(sut.DecodeToString(encoded), Is.EqualTo(value));
+    }
+
+    [Test]
+    public void PrefixAmbiguousTextAlphabet_IsSupportedOnlyBySymbolArrayOperations()
+    {
+        var sut = new Base<string>(new[] { "a", "ab" });
+        var bytes = Encoding.UTF8.GetBytes("A");
+
+        var encodedSymbols = sut.Encode(bytes);
+        var decodedBytes = sut.DecodeToBytes(encodedSymbols);
+        var decodedText = sut.DecodeToString(encodedSymbols);
+        var encodeBytesError = Assert.Throws<InvalidOperationException>(() => sut.EncodeToString(bytes));
+        var encodeTextError = Assert.Throws<InvalidOperationException>(() => sut.EncodeToString("A"));
+        var decodeTextError = Assert.Throws<InvalidOperationException>(() => sut.DecodeToString(string.Empty));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(decodedBytes, Is.EqualTo(bytes));
+            Assert.That(decodedText, Is.EqualTo("A"));
+            Assert.That(encodeBytesError!.Message, Does.Contain("'a' at index 0 is a prefix of 'ab' at index 1"));
+            Assert.That(encodeTextError!.Message, Does.Contain("prefix-free textual alphabet"));
+            Assert.That(decodeTextError!.Message, Does.Contain("symbol-array APIs"));
+        });
+    }
+
+    [Test]
+    public void EmptyTextSymbol_IsSupportedOnlyBySymbolArrayOperations()
+    {
+        var sut = new Base<string>(new[] { string.Empty, "one" });
+        var bytes = new byte[] { 0, 1, 255 };
+
+        var encodedSymbols = sut.Encode(bytes);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(sut.DecodeToBytes(encodedSymbols), Is.EqualTo(bytes));
+            Assert.That(
+                () => sut.EncodeToString(bytes),
+                Throws.TypeOf<InvalidOperationException>().With.Message.Contains("empty text representation"));
+            Assert.That(
+                () => sut.DecodeToString(string.Empty),
+                Throws.TypeOf<InvalidOperationException>().With.Message.Contains("symbol-array APIs"));
+        });
     }
 }
