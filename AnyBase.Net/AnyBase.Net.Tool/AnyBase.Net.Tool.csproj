@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>anybase</ToolCommandName>
+    <PackageId>AnyBase.Net.Tool</PackageId>
+    <Title>AnyBase.Net command-line tool</Title>
+    <Description>Encode and decode UTF-8 text from the command line with any ordered alphabet.</Description>
+    <PackageTags>dotnet-tool;encoding;base-conversion;radix;cli</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Initial anybase global tool with encode/decode, stdin, files, and custom alphabets.</PackageReleaseNotes>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AnyBase.Net\AnyBase.Net.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

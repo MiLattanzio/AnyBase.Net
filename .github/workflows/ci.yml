@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
+jobs:
+  build-test-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore AnyBase.Net/AnyBase.Net.sln
+
+      - name: Build
+        run: dotnet build AnyBase.Net/AnyBase.Net.sln --configuration Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test AnyBase.Net/AnyBase.Net.sln
+          --configuration Release
+          --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts/test-results
+
+      - name: Pack library
+        run: >-
+          dotnet pack AnyBase.Net/AnyBase.Net/AnyBase.Net.csproj
+          --configuration Release
+          --no-build
+          --output artifacts/packages
+
+      - name: Pack CLI tool
+        run: >-
+          dotnet pack AnyBase.Net/AnyBase.Net.Tool/AnyBase.Net.Tool.csproj
+          --configuration Release
+          --no-build
+          --output artifacts/packages
+
+      - name: Upload packages and test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts
+          path: |
+            artifacts/packages/*
+            artifacts/test-results/**/*
+          if-no-files-found: error

@@ -1,115 +1,106 @@
-# Documentazione della classe Base<TBase>
+# AnyBase.Net
 
-## Descrizione
+[![CI](https://github.com/MiLattanzio/AnyBase.Net/actions/workflows/ci.yml/badge.svg)](https://github.com/MiLattanzio/AnyBase.Net/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/AnyBase.Net.svg)](https://www.nuget.org/packages/AnyBase.Net)
+[![Tool](https://img.shields.io/nuget/v/AnyBase.Net.Tool.svg?label=dotnet%20tool)](https://www.nuget.org/packages/AnyBase.Net.Tool)
+[![Playground](https://img.shields.io/badge/playground-WebAssembly-c9ff65)](https://milattanzio.github.io/AnyBase.Net/)
 
-La classe `Base<TBase>` rappresenta un sistema generico di codifica e decodifica basato su una tipologia specificata di
-base. Fornisce funzionalità per codificare e decodificare dati in un sistema numerico definito da un insieme di valori
-di tipo `TBase`.
+Codifica e decodifica byte o testo UTF-8 usando un alfabeto ordinato qualsiasi.
+Ogni byte è rappresentato con una larghezza fissa, quindi il round-trip è
+deterministico anche con basi non potenze di due.
 
-## Parametri Generici
+La versione 1.1.0 usa `NumeralSystems.Net` 5.3.0.
 
-- `TBase`: Il tipo degli elementi della base. Deve implementare le interfacce `IComparable`, `IComparable<T>`,
-  `IConvertible` e `IEquatable<T>`.
+## Installazione
 
-## Proprietà
-
-- **Identity** (`IReadOnlyList<TBase>`): Elenco di elementi unici che definiscono l'identità della base utilizzata per
-  le operazioni di codifica e decodifica.
-
-- **Size** (`int`): Indica la dimensione utilizzata nelle operazioni di codifica e decodifica all'interno del sistema
-  numerico.
-
-- **NumeralSystem** (`NumeralSystem`): Rappresenta il sistema numerico utilizzato per le operazioni di codifica e
-  decodifica all'interno della classe `Base`.
-
-## Metodi
-
-### Pubblici
-
-- **Encode(byte[] bytes)**: Codifica un array di byte in un array di `TBase`.
-
-- **Encode(string value)**: Codifica una stringa in un array di `TBase`.
-
-- **EncodeToString(byte[] bytes)**: Codifica un array di byte in una stringa utilizzando il sistema numerico corrente e
-  l'identità specificata.
-
-- **EncodeToString(string value)**: Codifica una stringa nel suo formato di rappresentazione codificato.
-
-- **DecodeToString(string encoded)**: Decodifica una stringa codificata nella sua rappresentazione originale.
-
-- **DecodeToString(TBase[] encoded)**: Decodifica un array di elementi di tipo `TBase` in una stringa.
-
-- **DecodeToBytes(TBase[] encoded)**: Decodifica un array di elementi codificati di base `TBase` in un array di byte.
-
-## Costruttore
-
-- `Base(HashSet<TBase> identity)`: Inizializza una nuova istanza della classe `Base` con un'identità specificata.
-  L'identità non può essere nulla o vuota e deve contenere elementi unici.
-
-## Note
-
-La classe `Base` è utile in applicazioni che richiedono la conversione tra vari sistemi numerici, come la
-rappresentazione binaria, ottale o esadecimale dei dati. La classe fornisce metodi per assicurare la precisione nella
-conversione sia di stringhe che di array di byte in diversi formati di rappresentazione numerica.
-
-## Esempio di Utilizzo
-
-Un utilizzo comune della classe `Base` può essere visto nei test unitari della classe `BaseTest`, dove la codifica e la
-decodifica tra diversi sistemi numerici sono verificate e validate.
-
-### Esempio di Implementazione della Codifica Esadecimale
-
-Per implementare la codifica esadecimale con la classe `Base`, è necessario definire un'istanza della classe `Base`
-utilizzando il set di caratteri che rappresentano i numeri esadecimali:
-
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-```csharp
-namespace AnyBase.Example
-{
-public class HexEncodingExample
-{
-public static void Main()
-{
-// Definire l'identità del sistema numerico esadecimale
-var identity = new HashSet<char>(
-new[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' }
-);
-
-            // Creare un'istanza della classe Base usando il set di caratteri esadecimali
-            var hexBase = new Base<char>(identity);
-
-            // Stringa da codificare
-            var value = "Esempio di testo";
-
-            // Codificare la stringa in esadecimale
-            var encodedChars = hexBase.Encode(value);
-            var encodedString = hexBase.EncodeToString(value);
-            
-            // Visualizzare il testo codificato
-            Console.WriteLine($"Codificato: {encodedString}");
-
-            // Decodificare l'array di caratteri esadecimali
-            var decodedString = hexBase.DecodeToString(encodedChars);
-
-            // Visualizzare il testo decodificato
-            Console.WriteLine($"Decodificato: {decodedString}");
-        }
-    }
-}
+```console
+dotnet add package AnyBase.Net --version 1.1.0
 ```
 
-### Descrizione
+## Uso
 
-1. **Definizione dell'Identità**: Creiamo un `HashSet<char>` con i caratteri '0-9' e 'A-F' per rappresentare il sistema
-   numerico esadecimale.
-2. **Creazione della Classe Base**: Inizializziamo una nuova istanza di `Base<char>` con l'identità del sistema numerico
-   esadecimale.
-3. **Codifica della Stringa**: Utilizziamo il metodo `EncodeToString` per convertire la stringa originale in una
-   rappresentazione esadecimale.
-4. **Decodifica della Stringa**: Utilizziamo il metodo `DecodeToString` per convertire l'output esadecimale nuovamente
-   nella stringa originale.
+L'ordine dei simboli definisce il loro valore: il primo vale zero, il secondo
+uno e così via.
 
+```csharp
+using AnyBase.Net;
 
+var hexadecimal = new Base<char>("0123456789ABCDEF");
+
+var encoded = hexadecimal.EncodeToString("Ciao 🌍");
+// 4369616F20F09F8C8D
+
+var decoded = hexadecimal.DecodeToString(encoded);
+// Ciao 🌍
+```
+
+Sono supportati anche i byte arbitrari:
+
+```csharp
+var binary = new Base<char>("01");
+var source = new byte[] { 0, 1, 127, 128, 255 };
+
+var symbols = binary.Encode(source);
+var roundTrip = binary.DecodeToBytes(symbols);
+```
+
+Per alfabeti in cui ogni simbolo occupa più caratteri, l'overload che riceve
+un array di simboli evita qualsiasi ambiguità. La decodifica da stringa usa il
+matching più lungo e richiede rappresentazioni testuali uniche.
+
+## Playground WebAssembly
+
+Il [playground Blazor WebAssembly](https://milattanzio.github.io/AnyBase.Net/)
+esegue tutto localmente nel browser e permette di:
+
+- scegliere basi 2, 8, 10, 16, 32 e 64;
+- definire un alfabeto personalizzato;
+- codificare e decodificare testo UTF-8;
+- invertire la trasformazione e copiare il risultato.
+
+Per avviarlo in locale:
+
+```console
+dotnet run --project AnyBase.Net/AnyBase.Net.Playground
+```
+
+## Tool da riga di comando
+
+Installa il .NET global tool:
+
+```console
+dotnet tool install --global AnyBase.Net.Tool --version 1.1.0
+```
+
+Il comando installato è `anybase`:
+
+```console
+anybase encode "Hello" --base 16
+# 48656C6C6F
+
+anybase decode 48656C6C6F --base 16
+# Hello
+
+anybase encode "Hello" --alphabet "01"
+```
+
+Sono disponibili `--input <file|->`, `--output <file|->`, stdin e basi da 2 a
+64. Usa `anybase --help` per la sintassi completa.
+
+## Sviluppo
+
+```console
+dotnet restore AnyBase.Net/AnyBase.Net.sln
+dotnet build AnyBase.Net/AnyBase.Net.sln --configuration Release
+dotnet test AnyBase.Net/AnyBase.Net.sln --configuration Release
+```
+
+La suite copre l'intero intervallo dei byte, Unicode UTF-8, alfabeti custom,
+input malformati e il contratto della CLI.
+
+Le istruzioni per GitHub Pages e Trusted Publishing sono in
+[docs/RELEASING.md](docs/RELEASING.md).
+
+## Licenza
+
+[MIT](LICENSE)

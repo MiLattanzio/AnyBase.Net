@@ -9,6 +9,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Git", "Git", "{37DCCA52-544
 		..\README.md = ..\README.md
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnyBase.Net.Tool", "AnyBase.Net.Tool\AnyBase.Net.Tool.csproj", "{67D43025-4C59-4B65-8733-1BAF800804F2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnyBase.Net.Playground", "AnyBase.Net.Playground\AnyBase.Net.Playground.csproj", "{258863EF-43EF-40E6-BAEF-14C8B515AE00}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -23,5 +27,13 @@ Global
 		{3D5335D1-A488-4DE6-AE0F-9031ED705755}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3D5335D1-A488-4DE6-AE0F-9031ED705755}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3D5335D1-A488-4DE6-AE0F-9031ED705755}.Release|Any CPU.Build.0 = Release|Any CPU
+		{67D43025-4C59-4B65-8733-1BAF800804F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{67D43025-4C59-4B65-8733-1BAF800804F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{67D43025-4C59-4B65-8733-1BAF800804F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{67D43025-4C59-4B65-8733-1BAF800804F2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -1,0 +1,74 @@
+name: Deploy playground
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - AnyBase.Net/AnyBase.Net/**
+      - AnyBase.Net/AnyBase.Net.Playground/**
+      - Directory.Build.props
+      - global.json
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore AnyBase.Net/AnyBase.Net.sln
+
+      - name: Test
+        run: dotnet test AnyBase.Net/AnyBase.Net.sln --configuration Release --no-restore
+
+      - name: Publish playground
+        run: >-
+          dotnet publish AnyBase.Net/AnyBase.Net.Playground/AnyBase.Net.Playground.csproj
+          --configuration Release
+          --no-restore
+          --output artifacts/playground
+          -p:BlazorEnableCompression=false
+
+      - name: Prepare GitHub Pages base path
+        shell: bash
+        run: |
+          sed -i 's|<base href="/" />|<base href="/AnyBase.Net/" />|' artifacts/playground/wwwroot/index.html
+          cp artifacts/playground/wwwroot/index.html artifacts/playground/wwwroot/404.html
+          touch artifacts/playground/wwwroot/.nojekyll
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/playground/wwwroot
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

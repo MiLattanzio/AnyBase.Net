@@ -1,0 +1,230 @@
+@page "/"
+@inject IJSRuntime JavaScript
+
+<PageTitle>Playground · AnyBase.Net</PageTitle>
+
+<header class="hero">
+    <a class="brand" href="./" aria-label="AnyBase.Net playground">
+        <span class="brand-mark" aria-hidden="true">A<sup>n</sup></span>
+        <span>AnyBase.Net</span>
+    </a>
+    <a class="github-link" href="https://github.com/MiLattanzio/AnyBase.Net" target="_blank" rel="noreferrer">
+        GitHub <span aria-hidden="true">↗</span>
+    </a>
+
+    <div class="hero-copy">
+        <p class="eyebrow">WebAssembly playground</p>
+        <h1>Un alfabeto qualsiasi.<br /><span>Ogni byte, al suo posto.</span></h1>
+        <p class="lede">
+            Codifica e decodifica testo UTF‑8 direttamente nel browser. Nessun server,
+            nessun dato inviato altrove.
+        </p>
+    </div>
+</header>
+
+<main class="workspace">
+    <section class="control-panel" aria-labelledby="settings-title">
+        <div class="section-heading">
+            <span class="step">01</span>
+            <div>
+                <p class="eyebrow">Sistema</p>
+                <h2 id="settings-title">Scegli l’alfabeto</h2>
+            </div>
+        </div>
+
+        <label for="preset">Preset</label>
+        <select id="preset" @bind="SelectedPreset" @bind:after="PresetChanged">
+            @foreach (var preset in Presets)
+            {
+                <option value="@preset.Key">@preset.Name</option>
+            }
+            <option value="custom">Personalizzato</option>
+        </select>
+
+        <label for="alphabet">Simboli ordinati <span>zero → massimo</span></label>
+        <textarea id="alphabet"
+                  class="alphabet-input"
+                  rows="3"
+                  spellcheck="false"
+                  @bind="Alphabet"
+                  @bind:event="oninput"
+                  @onfocus="UseCustomPreset"></textarea>
+
+        <div class="stats" aria-live="polite">
+            <div><span>Base</span><strong>@Alphabet.Distinct().Count()</strong></div>
+            <div><span>Digit / byte</span><strong>@DigitsPerByte</strong></div>
+            <div><span>Versione</span><strong>@LibraryVersion</strong></div>
+        </div>
+    </section>
+
+    <section class="converter-panel" aria-labelledby="converter-title">
+        <div class="section-heading converter-heading">
+            <span class="step">02</span>
+            <div>
+                <p class="eyebrow">Trasformazione</p>
+                <h2 id="converter-title">Prova la libreria</h2>
+            </div>
+            <div class="mode-switch" aria-label="Modalità">
+                <button class="@(Mode == TransformMode.Encode ? "active" : null)"
+                        type="button"
+                        @onclick="() => SetMode(TransformMode.Encode)">Codifica</button>
+                <button class="@(Mode == TransformMode.Decode ? "active" : null)"
+                        type="button"
+                        @onclick="() => SetMode(TransformMode.Decode)">Decodifica</button>
+            </div>
+        </div>
+
+        <label for="input">@(Mode == TransformMode.Encode ? "Testo UTF‑8" : "Testo codificato")</label>
+        <textarea id="input"
+                  class="value-input"
+                  rows="6"
+                  spellcheck="false"
+                  @bind="Input"
+                  @bind:event="oninput"></textarea>
+
+        <button class="primary-action" type="button" @onclick="Transform">
+            <span>@(Mode == TransformMode.Encode ? "Codifica" : "Decodifica")</span>
+            <span aria-hidden="true">→</span>
+        </button>
+
+        <div class="output-header">
+            <label for="output">Risultato</label>
+            <div>
+                <button type="button" class="text-button" @onclick="Swap" disabled="@string.IsNullOrEmpty(Output)">Inverti</button>
+                <button type="button" class="text-button" @onclick="Copy" disabled="@string.IsNullOrEmpty(Output)">Copia</button>
+            </div>
+        </div>
+        <textarea id="output" class="value-output" rows="6" readonly value="@Output"></textarea>
+
+        @if (!string.IsNullOrEmpty(Message))
+        {
+            <p class="message @(HasError ? "error" : "success")" role="status">@Message</p>
+        }
+    </section>
+</main>
+
+<footer>
+    <p>AnyBase.Net · conversioni locali in WebAssembly</p>
+    <p>Powered by NumeralSystems.Net 5.3.0</p>
+</footer>
+
+@code {
+    private static readonly IReadOnlyList<AlphabetPreset> Presets = new[]
+    {
+        new AlphabetPreset("binary", "Binario", "01"),
+        new AlphabetPreset("octal", "Ottale", "01234567"),
+        new AlphabetPreset("decimal", "Decimale", "0123456789"),
+        new AlphabetPreset("hex", "Esadecimale", "0123456789ABCDEF"),
+        new AlphabetPreset("base32", "Base 32", "0123456789ABCDEFGHIJKLMNOPQRSTUV"),
+        new AlphabetPreset("base64", "Base 64", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/")
+    };
+
+    private string SelectedPreset { get; set; } = "hex";
+    private static string LibraryVersion { get; } =
+        typeof(Base<>).Assembly.GetName().Version?.ToString(3) ?? "dev";
+    private string Alphabet { get; set; } = "0123456789ABCDEF";
+    private string Input { get; set; } = "Ciao, mondo 🌍";
+    private string Output { get; set; } = string.Empty;
+    private string Message { get; set; } = "Pronto: scegli una modalità e trasforma il testo.";
+    private bool HasError { get; set; }
+    private TransformMode Mode { get; set; } = TransformMode.Encode;
+
+    private string DigitsPerByte
+    {
+        get
+        {
+            var uniqueCount = Alphabet.Distinct().Count();
+            if (uniqueCount < 2 || uniqueCount != Alphabet.Length)
+            {
+                return "—";
+            }
+
+            return new Base<char>(Alphabet).Size.ToString();
+        }
+    }
+
+    private void PresetChanged()
+    {
+        var preset = Presets.FirstOrDefault(candidate => candidate.Key == SelectedPreset);
+        if (preset != null)
+        {
+            Alphabet = preset.Alphabet;
+        }
+    }
+
+    private void UseCustomPreset()
+    {
+        SelectedPreset = "custom";
+    }
+
+    private void SetMode(TransformMode mode)
+    {
+        Mode = mode;
+        Output = string.Empty;
+        Message = mode == TransformMode.Encode
+            ? "Inserisci testo UTF‑8 da codificare."
+            : "Incolla una sequenza prodotta con lo stesso alfabeto.";
+        HasError = false;
+    }
+
+    private void Transform()
+    {
+        try
+        {
+            var converter = new Base<char>(Alphabet);
+            Output = Mode == TransformMode.Encode
+                ? converter.EncodeToString(Input)
+                : converter.DecodeToString(Input);
+            Message = Mode == TransformMode.Encode
+                ? $"{System.Text.Encoding.UTF8.GetByteCount(Input)} byte → {Output.Length} simboli"
+                : $"{Input.Length} simboli → {System.Text.Encoding.UTF8.GetByteCount(Output)} byte";
+            HasError = false;
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException or DecoderFallbackException)
+        {
+            Output = string.Empty;
+            Message = exception.Message;
+            HasError = true;
+        }
+    }
+
+    private void Swap()
+    {
+        if (string.IsNullOrEmpty(Output))
+        {
+            return;
+        }
+
+        Input = Output;
+        Mode = Mode == TransformMode.Encode ? TransformMode.Decode : TransformMode.Encode;
+        Transform();
+    }
+
+    private async Task Copy()
+    {
+        if (string.IsNullOrEmpty(Output))
+        {
+            return;
+        }
+
+        try
+        {
+            await JavaScript.InvokeVoidAsync("navigator.clipboard.writeText", Output);
+            Message = "Risultato copiato negli appunti.";
+            HasError = false;
+        }
+        catch (JSException)
+        {
+            Message = "Il browser non ha consentito l’accesso agli appunti.";
+            HasError = true;
+        }
+    }
+
+    private sealed record AlphabetPreset(string Key, string Name, string Alphabet);
+
+    private enum TransformMode
+    {
+        Encode,
+        Decode
+    }
+}

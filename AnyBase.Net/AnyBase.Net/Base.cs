@@ -1,216 +1,279 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using NumeralSystems.Net;
-using NumeralSystems.Net.Utils;
 
 namespace AnyBase.Net
 {
     /// <summary>
-    /// Represents a generic base encoding and decoding system for a specified type of base.
+    /// Encodes bytes and UTF-8 text with an ordered alphabet.
     /// </summary>
-    /// <typeparam name="TBase">
-    /// The type of the base elements, which must implement the <see cref="IComparable"/>, <see cref="IComparable{T}"/>,
-    /// <see cref="IConvertible"/>, and <see cref="IEquatable{T}"/> interfaces.
-    /// </typeparam>
-    /// <remarks>
-    /// The <c>Base</c> class provides functionality to encode and decode data into a numeral system defined by a specific set
-    /// of values of type <c>TBase</c>. It supports operations to encode byte arrays and strings as well as decode encoded data back into strings or byte arrays.
-    /// </remarks>
-    public class Base<TBase>: IBase<TBase> where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
+    /// <typeparam name="TBase">The symbol type used by the alphabet.</typeparam>
+    public class Base<TBase> : IBase<TBase>
+        where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
     {
+        private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
+        private readonly IReadOnlyDictionary<TBase, int> _indices;
+        private int _size;
+
         /// <summary>
-        /// Gets the list of unique elements that define the base identity used for encoding and decoding operations.
+        /// Gets the symbols in numeric order, where the first symbol represents zero.
         /// </summary>
-        /// <remarks>
-        /// The identity is a collection of elements that the base uses to represent data. Each element corresponds to a numeral
-        /// in the numeral system. This property is essential for translation between numerical values and their encoded representations.
-        /// </remarks>
         public IReadOnlyList<TBase> Identity { get; }
 
         /// <summary>
-        /// Gets or sets the size used for encoding and decoding operations.
+        /// Gets or sets the fixed number of symbols used to encode each byte.
         /// </summary>
         /// <remarks>
-        /// The size property determines the grouping of indices for encoding and decoding processes.
-        /// It influences how the numeral representations are adjusted and grouped during encoding transformations.
-        /// Proper setting of this property is crucial for ensuring accurate translation between encoded data
-        /// and its original byte or string forms.
+        /// The value can be increased to add leading zero symbols, but cannot be lower
+        /// than the number of digits needed to represent a byte in the selected base.
         /// </remarks>
-        public int Size { get; set; }
+        public int Size
+        {
+            get => _size;
+            set
+            {
+                if (value < NumeralSystem.Length)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(value),
+                        value,
+                        $"Size must be at least {NumeralSystem.Length} for base {Identity.Count}.");
+                }
+
+                _size = value;
+            }
+        }
 
         /// <summary>
-        /// Represents the numeral system used for encoding and decoding operations within the Base class.
-        /// Used to convert between different numeral systems and the identity of the Base class.
+        /// Gets the underlying numeral system.
         /// </summary>
         public NumeralSystem NumeralSystem { get; }
 
         /// <summary>
-        /// Represents a private instance of the NumeralSystem class for internal encoding and decoding operations.
+        /// Initializes a base from a set of unique symbols.
         /// </summary>
         /// <remarks>
-        /// This numeral system is initialized with the maximum value of a character and is used to convert
-        /// between different numeral representations within the encoding and decoding methods of the Base class.
+        /// This overload is retained for compatibility. Prefer the enumerable overload
+        /// when the alphabet order must be explicit.
         /// </remarks>
-        private readonly NumeralSystem _stringSystem = new NumeralSystem(char.MaxValue);
+        public Base(HashSet<TBase> identity)
+            : this((IEnumerable<TBase>)identity)
+        {
+        }
 
         /// <summary>
-        /// Encodes a byte array into an array of the specified generic type TBase by converting each byte
-        /// to its corresponding numeral using a predefined numeral system.
+        /// Initializes a base from symbols supplied in numeric order.
         /// </summary>
-        /// <param name="bytes">The byte array to be encoded.</param>
-        /// <returns>An array of type TBase representing the encoded bytes.</returns>
+        /// <param name="identity">The ordered alphabet. At least two unique symbols are required.</param>
+        public Base(IEnumerable<TBase> identity)
+        {
+            if (identity == null)
+            {
+                throw new ArgumentNullException(nameof(identity));
+            }
+
+            var values = identity.ToList();
+            if (values.Count < 2)
+            {
+                throw new ArgumentException("Identity must contain at least two symbols.", nameof(identity));
+            }
+
+            if (values.Any(value => value is null))
+            {
+                throw new ArgumentException("Identity cannot contain null symbols.", nameof(identity));
+            }
+
+            if (values.Distinct().Count() != values.Count)
+            {
+                throw new ArgumentException("Identity symbols must be unique.", nameof(identity));
+            }
+
+            Identity = Array.AsReadOnly(values.ToArray());
+            _indices = values
+                .Select((symbol, index) => new KeyValuePair<TBase, int>(symbol, index))
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+            NumeralSystem = Numeral.System.OfBase(Identity.Count);
+            _size = NumeralSystem.Length;
+        }
+
+        /// <inheritdoc />
         public TBase[] Encode(byte[] bytes)
         {
-            var indices = bytes.Select(b => (int)b).ToList();
-            var numerals = indices.Select(x => NumeralSystem[x]).ToArray();
-            var encodedNumerals = numerals.Select(x => AdjustSize(x, Size)).ToArray();
-            var output = encodedNumerals.Select(x => x.IntegralIndices.Select(y => Identity[y])).SelectMany(x => x).ToArray();
-            return output;
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
+            return bytes
+                .Select(NumeralForByte)
+                .SelectMany(numeral => numeral.IntegralIndices.Select(index => Identity[index]))
+                .ToArray();
         }
 
-        /// <summary>
-        /// Encodes the given string into an array of <typeparamref name="TBase"/> type.
-        /// </summary>
-        /// <param name="bytes">The string to be encoded.</param>
-        /// <returns>An array of <typeparamref name="TBase"/> representing the encoded value of the input string.</returns>
-        public TBase[] Encode(string bytes)
+        /// <inheritdoc />
+        public TBase[] Encode(string value)
         {
-            var chars = bytes.ToCharArray();
-            var indices = chars.Select(b => (int)b).ToList();
-            var numerals = indices.Select(x => NumeralSystem[x]).ToArray();
-            var encodedNumerals = numerals.Select(x => AdjustSize(x, Size)).ToArray();
-            var output = encodedNumerals.Select(x => x.IntegralIndices.Select(y => Identity[y])).SelectMany(x => x).ToArray();
-            return output;
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            return Encode(StrictUtf8.GetBytes(value));
         }
 
-        /// <summary>
-        /// Encodes the specified byte array into a string using the current numeral system and identity.
-        /// </summary>
-        /// <param name="bytes">The byte array to encode into a string.</param>
-        /// <returns>A string representation of the encoded byte array, utilizing the specified identity mapping.</returns>
+        /// <inheritdoc />
         public string EncodeToString(byte[] bytes)
         {
-            var encoded = Encode(bytes);
-            var output = encoded.Select(x => x.ToString()).ToArray();
-            return string.Concat(output);
+            return string.Concat(Encode(bytes).Select(SymbolText));
         }
 
-        /// <summary>
-        /// Encodes a given string to its encoded representation in string format.
-        /// </summary>
-        /// <param name="value">The string value to be encoded.</param>
-        /// <returns>A string containing the encoded representation of the input string.</returns>
+        /// <inheritdoc />
         public string EncodeToString(string value)
         {
-            var encoded = Encode(value);
-            var output = encoded.Select(x => x.ToString()).ToArray();
-            return string.Concat(output);
+            return string.Concat(Encode(value).Select(SymbolText));
         }
 
-        /// <summary>
-        /// Decodes an encoded string to its original string representation using the defined numeral system and identity list.
-        /// </summary>
-        /// <param name="encoded">The encoded string to be decoded.</param>
-        /// <returns>The decoded string reconstructed from the encoded input.</returns>
+        /// <inheritdoc />
         public string DecodeToString(string encoded)
         {
-            var identityStringList = Identity.Select(x => x.ToString()).ToList();
-            var split = encoded.SplitAndKeep(identityStringList.ToArray());
-            var indices = split.Select(x => identityStringList.IndexOf(x)).ToList();
-            var encodedNumeral = new Numeral(NumeralSystem, indices, new List<int>());
-            var result = encodedNumeral.To(_stringSystem);
-            var output = result.IntegralIndices.Select(x => Identity[x]).ToArray();
-            return string.Concat(output);
+            if (encoded == null)
+            {
+                throw new ArgumentNullException(nameof(encoded));
+            }
+
+            if (encoded.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var tokens = Identity
+                .Select((symbol, index) => new SymbolToken(SymbolText(symbol), index))
+                .ToArray();
+
+            if (tokens.Any(token => token.Text.Length == 0))
+            {
+                throw new InvalidOperationException(
+                    "String decoding is unavailable when an identity symbol has an empty text representation.");
+            }
+
+            if (tokens.Select(token => token.Text).Distinct(StringComparer.Ordinal).Count() != tokens.Length)
+            {
+                throw new InvalidOperationException(
+                    "String decoding requires every identity symbol to have a unique text representation.");
+            }
+
+            var orderedTokens = tokens
+                .OrderByDescending(token => token.Text.Length)
+                .ThenBy(token => token.Index)
+                .ToArray();
+            var symbols = new List<TBase>();
+
+            for (var position = 0; position < encoded.Length;)
+            {
+                var token = orderedTokens.FirstOrDefault(candidate =>
+                    candidate.Text.Length <= encoded.Length - position &&
+                    string.CompareOrdinal(encoded, position, candidate.Text, 0, candidate.Text.Length) == 0);
+
+                if (token == null)
+                {
+                    throw new FormatException($"Unknown identity symbol at position {position}.");
+                }
+
+                symbols.Add(Identity[token.Index]);
+                position += token.Text.Length;
+            }
+
+            return DecodeToString(symbols.ToArray());
         }
 
-        /// <summary>
-        /// Decodes an array of elements of type <typeparamref name="TBase"/> into a string representation
-        /// using a specified numeral system and identity mapping.
-        /// </summary>
-        /// <param name="encoded">An array of encoded elements of type <typeparamref name="TBase"/> to be decoded into a string.</param>
-        /// <returns>Returns a string decoded from the specified array of encoded elements.</returns>
+        /// <inheritdoc />
         public string DecodeToString(TBase[] encoded)
         {
-            var identityList = Identity.ToList();
-            var indices = encoded.Select(x => identityList.IndexOf(x)).ToArray();
-            var indicesGrouped = indices.Group(Size);
-            var encodedNumerals = indicesGrouped.Select(x => new Numeral(NumeralSystem, x.ToList(), new List<int>())).ToList();
-            var decodedNumerals = encodedNumerals.Select(x => x.To(_stringSystem)).ToArray();
-            return string.Concat(decodedNumerals.Select(x => x.Char));
+            return StrictUtf8.GetString(DecodeToBytes(encoded));
         }
 
-        /// <summary>
-        /// Decodes an array of encoded elements of base type TBase into a byte array.
-        /// </summary>
-        /// <param name="encoded">An array of encoded elements of base type TBase to be decoded.</param>
-        /// <returns>A byte array representing the decoded values.</returns>
+        /// <inheritdoc />
         public byte[] DecodeToBytes(TBase[] encoded)
         {
-            var identityList = Identity.ToList();
-            var indices = encoded.Select(x => identityList.IndexOf(x)).ToArray();
-            var indicesGrouped = indices.Group(Size);
-            var encodedNumerals = indicesGrouped.Select(x => new Numeral(NumeralSystem, x.ToList(), new List<int>())).ToList();
-            var decodedNumerals = encodedNumerals.Select(x => x.To(_stringSystem)).ToArray();
-            var groupedBytes = decodedNumerals.Select(x => x.Bytes);
-            var removedTrailingZeros = groupedBytes.Select(x => RemoveTrailing(x, (byte)0)).ToArray();
-            return removedTrailingZeros.SelectMany(x => x).ToArray();
-        }
-
-        /// <summary>
-        /// Removes trailing elements from the provided array that match the specified value.
-        /// </summary>
-        /// <typeparam name="T">The type of elements in the input array.</typeparam>
-        /// <param name="input">The array from which trailing elements matching the specified value should be removed.</param>
-        /// <param name="value">The value to be removed from the end of the array.</param>
-        /// <returns>A new array with trailing elements removed that match the specified value.</returns>
-        private static T[] RemoveTrailing<T>(T[] input, T value)
-        {
-            if (input.Length == 0)
-                return Array.Empty<T>();
-
-            // Find the last index that does not match the given value
-            int lastIndex = input.Length - 1;
-            while (lastIndex >= 0 && EqualityComparer<T>.Default.Equals(input[lastIndex], value))
+            if (encoded == null)
             {
-                lastIndex--;
+                throw new ArgumentNullException(nameof(encoded));
             }
 
-            // Return the trimmed array
-            return input.Take(lastIndex + 1).ToArray();
+            if (encoded.Length == 0)
+            {
+                return Array.Empty<byte>();
+            }
+
+            if (encoded.Length % Size != 0)
+            {
+                throw new FormatException($"Encoded input length must be a multiple of {Size}.");
+            }
+
+            var output = new byte[encoded.Length / Size];
+            for (var group = 0; group < output.Length; group++)
+            {
+                var value = 0;
+                for (var offset = 0; offset < Size; offset++)
+                {
+                    var symbolPosition = group * Size + offset;
+                    if (!_indices.TryGetValue(encoded[symbolPosition], out var digit))
+                    {
+                        throw new FormatException($"Unknown identity symbol at index {symbolPosition}.");
+                    }
+
+                    if (value > (byte.MaxValue - digit) / Identity.Count)
+                    {
+                        throw new FormatException($"Encoded group at index {group} exceeds the byte range.");
+                    }
+
+                    value = value * Identity.Count + digit;
+                }
+
+                output[group] = (byte)value;
+            }
+
+            return output;
         }
 
-        /// Adjusts the size of a numeral's integral part to a specified size by padding with zeros if necessary.
-        /// <param name="numeral">The numeral to be adjusted.</param>
-        /// <param name="size">The desired size of the numeral's integral part.</param>
-        /// <return>A Numeral instance with the integral part adjusted to the specified size.</return>
-        private static Numeral AdjustSize(Numeral numeral, int size)
+        private Numeral NumeralForByte(byte value)
         {
-            if (numeral.IntegralIndices.Count == size) return numeral;
-            var integral = numeral.IntegralIndices.ToList();
-            var difference = size - numeral.IntegralIndices.Count;
-            if (difference > 0)
+            var numeral = NumeralSystem[value];
+            if (numeral.IntegralIndices.Count == Size)
             {
-                integral = Enumerable.Repeat(0, difference).Concat(integral).ToList();
+                return numeral;
             }
+
+            if (numeral.IntegralIndices.Count > Size)
+            {
+                throw new InvalidOperationException("The configured size cannot represent a byte.");
+            }
+
+            var integral = Enumerable
+                .Repeat(0, Size - numeral.IntegralIndices.Count)
+                .Concat(numeral.IntegralIndices)
+                .ToList();
             return new Numeral(numeral.Base, integral, numeral.FractionalIndices, numeral.Positive);
         }
 
-        /// <summary>
-        /// Represents a mathematical base or numeral system for encoding and decoding data.
-        /// </summary>
-        /// <typeparam name="TBase">
-        /// The type of the elements in the base, which must implement IComparable, IComparable&lt;T&gt;,
-        /// IConvertible, and IEquatable&lt;T&gt;.
-        /// </typeparam>
-        public Base(HashSet<TBase> identity)
+        private static string SymbolText(TBase symbol)
         {
-            if (null == identity) throw new ArgumentException("Identity cannot be null.");
-            if (identity.Count == 0) throw new ArgumentException("Identity cannot be empty.");
-            Identity = identity.ToList();
-            NumeralSystem = Numeral.System.OfBase(Identity.Count);
-            Size = NumeralSystem.Length;
+            return symbol.ToString() ?? string.Empty;
         }
-        
+
+        private sealed class SymbolToken
+        {
+            public SymbolToken(string text, int index)
+            {
+                Text = text;
+                Index = index;
+            }
+
+            public string Text { get; }
+
+            public int Index { get; }
+        }
     }
 }

@@ -1,0 +1,16 @@
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Not found · AnyBase.Net</PageTitle>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <main class="not-found">
+                <p class="eyebrow">404</p>
+                <h1>Questa rotta non esiste.</h1>
+                <a href="./">Torna al playground</a>
+            </main>
+        </LayoutView>
+    </NotFound>
+</Router>
