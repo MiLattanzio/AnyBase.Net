@@ -135,6 +135,231 @@ namespace AnyBase.Net
             _size = NumeralSystem.Length;
         }
 
+        /// <summary>
+        /// Calculates the exact number of identity symbols needed to encode a byte count.
+        /// </summary>
+        /// <param name="byteCount">The non-negative number of source bytes.</param>
+        /// <returns>The exact encoded symbol count.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="byteCount"/> is negative.</exception>
+        /// <exception cref="OverflowException">The encoded symbol count exceeds <see cref="int.MaxValue"/>.</exception>
+        public int GetEncodedLength(int byteCount)
+        {
+            if (byteCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(byteCount), byteCount, "Byte count cannot be negative.");
+            }
+
+            return checked(byteCount * Size);
+        }
+
+        /// <summary>
+        /// Calculates the exact byte count represented by a complete encoded symbol sequence.
+        /// </summary>
+        /// <param name="symbolCount">The non-negative encoded symbol count.</param>
+        /// <returns>The exact decoded byte count.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="symbolCount"/> is negative.</exception>
+        /// <exception cref="FormatException"><paramref name="symbolCount"/> is not a multiple of <see cref="Size"/>.</exception>
+        public int GetDecodedLength(int symbolCount)
+        {
+            if (symbolCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(symbolCount),
+                    symbolCount,
+                    "Symbol count cannot be negative.");
+            }
+
+            if (!TryGetDecodedLength(symbolCount, out var byteCount))
+            {
+                var incompleteGroupIndex = symbolCount / Size;
+                var incompleteGroupStart = incompleteGroupIndex * Size;
+                throw new FormatException(
+                    $"Encoded symbol count {symbolCount} must be a multiple of Size {Size}. " +
+                    $"Incomplete byte group {incompleteGroupIndex} starts at symbol index {incompleteGroupStart}.");
+            }
+
+            return byteCount;
+        }
+
+        /// <summary>
+        /// Tries to calculate the byte count represented by an encoded symbol count.
+        /// </summary>
+        /// <param name="symbolCount">The encoded symbol count.</param>
+        /// <param name="byteCount">The decoded byte count, or zero when the count is invalid.</param>
+        /// <returns><see langword="true"/> when <paramref name="symbolCount"/> is non-negative and complete.</returns>
+        public bool TryGetDecodedLength(int symbolCount, out int byteCount)
+        {
+            if (symbolCount < 0 || symbolCount % Size != 0)
+            {
+                byteCount = 0;
+                return false;
+            }
+
+            byteCount = symbolCount / Size;
+            return true;
+        }
+
+        /// <summary>
+        /// Calculates the maximum number of UTF-16 characters needed to encode a byte count as text.
+        /// </summary>
+        /// <param name="byteCount">The non-negative source byte count.</param>
+        /// <param name="separator">
+        /// An optional non-empty separator between symbols; <see langword="null"/> means concatenated text.
+        /// </param>
+        /// <returns>The maximum encoded text length.</returns>
+        public int GetMaxEncodedTextLength(int byteCount, string? separator = null)
+        {
+            var tokens = separator == null
+                ? GetTextTokensForStringOperations()
+                : GetTextTokensForSeparatedStringOperations(separator);
+            var symbolCount = GetEncodedLength(byteCount);
+            if (symbolCount == 0)
+            {
+                return 0;
+            }
+
+            var maximumTokenLength = tokens.Max(token => token.Text.Length);
+            return checked(
+                checked(symbolCount * maximumTokenLength) +
+                checked((symbolCount - 1) * (separator?.Length ?? 0)));
+        }
+
+        /// <summary>
+        /// Calculates the exact number of UTF-16 characters produced when encoding bytes as text.
+        /// </summary>
+        /// <param name="bytes">The source bytes.</param>
+        /// <param name="separator">
+        /// An optional non-empty separator between symbols; <see langword="null"/> means concatenated text.
+        /// </param>
+        /// <returns>The exact encoded text length.</returns>
+        public int GetEncodedTextLength(ReadOnlySpan<byte> bytes, string? separator = null)
+        {
+            var tokens = separator == null
+                ? GetTextTokensForStringOperations()
+                : GetTextTokensForSeparatedStringOperations(separator);
+            var textLength = 0;
+            var symbolCount = GetEncodedLength(bytes.Length);
+
+            for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
+            {
+                var value = (int)bytes[byteIndex];
+                for (var offset = Size - 1; offset >= 0; offset--)
+                {
+                    var digit = value % Identity.Count;
+                    textLength = checked(textLength + tokens[digit].Text.Length);
+                    value /= Identity.Count;
+                }
+            }
+
+            if (separator != null && symbolCount > 1)
+            {
+                textLength = checked(textLength + checked((symbolCount - 1) * separator.Length));
+            }
+
+            return textLength;
+        }
+
+        /// <summary>
+        /// Encodes bytes into a caller-provided symbol span without allocating an output array.
+        /// </summary>
+        /// <param name="bytes">The source bytes.</param>
+        /// <param name="destination">The destination symbol span.</param>
+        /// <returns>The number of symbols written.</returns>
+        /// <exception cref="ArgumentException"><paramref name="destination"/> is too small.</exception>
+        public int Encode(ReadOnlySpan<byte> bytes, Span<TBase> destination)
+        {
+            var requiredLength = GetEncodedLength(bytes.Length);
+            if (destination.Length < requiredLength)
+            {
+                throw new ArgumentException(
+                    $"Destination length {destination.Length} is smaller than the required encoded length {requiredLength}.",
+                    nameof(destination));
+            }
+
+            for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
+            {
+                var value = (int)bytes[byteIndex];
+                var groupStart = byteIndex * Size;
+                for (var offset = Size - 1; offset >= 0; offset--)
+                {
+                    destination[groupStart + offset] = Identity[value % Identity.Count];
+                    value /= Identity.Count;
+                }
+            }
+
+            return requiredLength;
+        }
+
+        /// <summary>
+        /// Encodes byte memory into caller-provided symbol memory.
+        /// </summary>
+        /// <param name="bytes">The source byte memory.</param>
+        /// <param name="destination">The destination symbol memory.</param>
+        /// <returns>The number of symbols written.</returns>
+        public int EncodeMemory(ReadOnlyMemory<byte> bytes, Memory<TBase> destination)
+        {
+            return Encode(bytes.Span, destination.Span);
+        }
+
+        /// <summary>
+        /// Decodes identity symbols into a caller-provided byte span without allocating an output array.
+        /// </summary>
+        /// <param name="encoded">The encoded identity symbols.</param>
+        /// <param name="destination">The destination byte span.</param>
+        /// <returns>The number of bytes written.</returns>
+        /// <exception cref="ArgumentException"><paramref name="destination"/> is too small.</exception>
+        /// <exception cref="FormatException">The input is incomplete, contains an unknown symbol, or exceeds 255.</exception>
+        public int Decode(ReadOnlySpan<TBase> encoded, Span<byte> destination)
+        {
+            var requiredLength = GetDecodedLength(encoded.Length);
+            if (destination.Length < requiredLength)
+            {
+                throw new ArgumentException(
+                    $"Destination length {destination.Length} is smaller than the required decoded length {requiredLength}.",
+                    nameof(destination));
+            }
+
+            for (var group = 0; group < requiredLength; group++)
+            {
+                var value = 0;
+                for (var offset = 0; offset < Size; offset++)
+                {
+                    var symbolPosition = group * Size + offset;
+                    var symbol = encoded[symbolPosition];
+                    if (symbol is null || !_indices.TryGetValue(symbol, out var digit))
+                    {
+                        throw new FormatException(
+                            $"Unknown identity symbol {DescribeSymbol(symbol!)} at symbol index {symbolPosition} " +
+                            $"(byte group {group}, offset {offset}).");
+                    }
+
+                    if (value > (byte.MaxValue - digit) / Identity.Count)
+                    {
+                        throw new FormatException(
+                            $"Encoded byte group {group} exceeds 255 at symbol index {symbolPosition}: " +
+                            $"accumulated value {value}, digit {digit}, base {Identity.Count}.");
+                    }
+
+                    value = value * Identity.Count + digit;
+                }
+
+                destination[group] = (byte)value;
+            }
+
+            return requiredLength;
+        }
+
+        /// <summary>
+        /// Decodes identity symbol memory into caller-provided byte memory.
+        /// </summary>
+        /// <param name="encoded">The encoded symbol memory.</param>
+        /// <param name="destination">The destination byte memory.</param>
+        /// <returns>The number of bytes written.</returns>
+        public int DecodeMemory(ReadOnlyMemory<TBase> encoded, Memory<byte> destination)
+        {
+            return Decode(encoded.Span, destination.Span);
+        }
+
         /// <inheritdoc />
         public TBase[] Encode(byte[] bytes)
         {
@@ -143,10 +368,9 @@ namespace AnyBase.Net
                 throw new ArgumentNullException(nameof(bytes));
             }
 
-            return bytes
-                .Select(NumeralForByte)
-                .SelectMany(numeral => numeral.IntegralIndices.Select(index => Identity[index]))
-                .ToArray();
+            var output = new TBase[GetEncodedLength(bytes.Length)];
+            Encode(bytes.AsSpan(), output.AsSpan());
+            return output;
         }
 
         /// <inheritdoc />
@@ -368,64 +592,19 @@ namespace AnyBase.Net
                 return Array.Empty<byte>();
             }
 
-            if (encoded.Length % Size != 0)
-            {
-                var incompleteGroupIndex = encoded.Length / Size;
-                var incompleteGroupStart = incompleteGroupIndex * Size;
-                throw new FormatException(
-                    $"Encoded symbol count {encoded.Length} must be a multiple of Size {Size}. " +
-                    $"Incomplete byte group {incompleteGroupIndex} starts at symbol index {incompleteGroupStart}.");
-            }
-
-            var output = new byte[encoded.Length / Size];
-            for (var group = 0; group < output.Length; group++)
-            {
-                var value = 0;
-                for (var offset = 0; offset < Size; offset++)
-                {
-                    var symbolPosition = group * Size + offset;
-                    var symbol = encoded[symbolPosition];
-                    if (symbol is null || !_indices.TryGetValue(symbol, out var digit))
-                    {
-                        throw new FormatException(
-                            $"Unknown identity symbol {DescribeSymbol(symbol!)} at symbol index {symbolPosition} " +
-                            $"(byte group {group}, offset {offset}).");
-                    }
-
-                    if (value > (byte.MaxValue - digit) / Identity.Count)
-                    {
-                        throw new FormatException(
-                            $"Encoded byte group {group} exceeds 255 at symbol index {symbolPosition}: " +
-                            $"accumulated value {value}, digit {digit}, base {Identity.Count}.");
-                    }
-
-                    value = value * Identity.Count + digit;
-                }
-
-                output[group] = (byte)value;
-            }
-
+            var output = new byte[GetDecodedLength(encoded.Length)];
+            Decode(encoded.AsSpan(), output.AsSpan());
             return output;
         }
 
-        private Numeral NumeralForByte(byte value)
+        internal int GetIdentityIndex(TBase symbol)
         {
-            var numeral = NumeralSystem[value];
-            if (numeral.IntegralIndices.Count == Size)
+            if (symbol != null && _indices.TryGetValue(symbol, out var index))
             {
-                return numeral;
+                return index;
             }
 
-            if (numeral.IntegralIndices.Count > Size)
-            {
-                throw new InvalidOperationException("The configured size cannot represent a byte.");
-            }
-
-            var integral = Enumerable
-                .Repeat(0, Size - numeral.IntegralIndices.Count)
-                .Concat(numeral.IntegralIndices)
-                .ToList();
-            return new Numeral(numeral.Base, integral, numeral.FractionalIndices, numeral.Positive);
+            throw new InvalidOperationException("The encoded symbol is not present in the codec identity.");
         }
 
         private string DecodeUtf8(byte[] bytes)

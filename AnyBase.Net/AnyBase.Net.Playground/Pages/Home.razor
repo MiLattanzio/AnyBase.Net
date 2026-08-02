@@ -15,10 +15,10 @@
 
     <div class="hero-copy">
         <p class="eyebrow">WebAssembly playground</p>
-        <h1>Un alfabeto qualsiasi.<br /><span>Ogni byte, al suo posto.</span></h1>
+        <h1>Un alfabeto qualsiasi.<br /><span>Ora anche per file e byte.</span></h1>
         <p class="lede">
-            Codifica e decodifica testo UTF-8 direttamente nel browser. Nessun server,
-            nessun dato inviato altrove.
+            Codifica e decodifica testo o dati binari direttamente nel browser.
+            Nessun server, nessun dato inviato altrove.
         </p>
     </div>
 </header>
@@ -108,27 +108,72 @@
             </div>
         </div>
 
-        <label for="input">@(Mode == TransformMode.Encode ? "Testo UTF-8" : "Testo codificato")</label>
+        <div class="file-loader">
+            <div>
+                <strong>Carica un file</strong>
+                <span>@(LoadedFileName ?? "Fino a 16 MiB, elaborazione locale")</span>
+            </div>
+            <InputFile id="file-input" OnChange="LoadFile" />
+        </div>
+
+        <div class="view-header">
+            <label for="input">Input <span>@FormatBytes(InputBytes.Length)</span></label>
+            <div class="view-switch" aria-label="Vista input">
+                @foreach (var view in Enum.GetValues<DataView>())
+                {
+                    <button type="button"
+                            class="@(InputView == view ? "active" : null)"
+                            @onclick="() => SetInputView(view)">@ViewName(view)</button>
+                }
+            </div>
+        </div>
         <textarea id="input"
                   class="value-input"
-                  rows="6"
+                  rows="7"
                   spellcheck="false"
-                  @bind="Input"
-                  @bind:event="oninput"></textarea>
+                  value="@InputDisplay"
+                  @oninput="UpdateInputDisplay"></textarea>
+        @if (InputIsPreview)
+        {
+            <p class="preview-note">Vista limitata per mantenere fluida l’interfaccia; la trasformazione usa tutti i byte.</p>
+        }
 
         <button class="primary-action" type="button" @onclick="Transform" disabled="@(!CanTransform)">
             <span>@(Mode == TransformMode.Encode ? "Codifica" : "Decodifica")</span>
             <span aria-hidden="true">→</span>
         </button>
 
-        <div class="output-header">
-            <label for="output">Risultato</label>
-            <div>
-                <button type="button" class="text-button" @onclick="Swap" disabled="@string.IsNullOrEmpty(Output)">Inverti</button>
-                <button type="button" class="text-button" @onclick="Copy" disabled="@string.IsNullOrEmpty(Output)">Copia</button>
+        @if (HasOutput)
+        {
+            <div class="transfer-stats" aria-label="Dimensioni trasformazione">
+                <div><span>Input</span><strong>@FormatBytes(LastInputSize)</strong></div>
+                <div><span>Output</span><strong>@FormatBytes(OutputBytes.Length)</strong></div>
+                <div><span>Rapporto</span><strong>@ExpansionRatio</strong></div>
+            </div>
+        }
+
+        <div class="output-header view-header">
+            <label for="output">Risultato <span>@(HasOutput ? FormatBytes(OutputBytes.Length) : "—")</span></label>
+            <div class="view-switch" aria-label="Vista risultato">
+                @foreach (var view in Enum.GetValues<DataView>())
+                {
+                    <button type="button"
+                            class="@(OutputView == view ? "active" : null)"
+                            @onclick="() => SetOutputView(view)">@ViewName(view)</button>
+                }
             </div>
         </div>
-        <textarea id="output" class="value-output" rows="6" readonly value="@Output"></textarea>
+        <textarea id="output" class="value-output" rows="7" readonly value="@OutputDisplay"></textarea>
+        @if (OutputIsPreview)
+        {
+            <p class="preview-note">Anteprima limitata; il download contiene tutti i @FormatBytes(OutputBytes.Length).</p>
+        }
+
+        <div class="result-actions">
+            <button type="button" class="text-button" @onclick="Swap" disabled="@(!HasOutput)">Inverti</button>
+            <button type="button" class="text-button" @onclick="Copy" disabled="@(!HasOutput)">Copia vista</button>
+            <button type="button" class="download-action" @onclick="Download" disabled="@(!HasOutput)">Scarica risultato</button>
+        </div>
 
         @if (!string.IsNullOrEmpty(Message))
         {
@@ -143,6 +188,12 @@
 </footer>
 
 @code {
+    private const long MaximumFileSize = 16L * 1024 * 1024;
+    private const int TextPreviewCharacters = 8192;
+    private const int HexPreviewBytes = 4096;
+    private const int BytePreviewBytes = 2048;
+    private static readonly System.Text.Encoding StrictUtf8 = new System.Text.UTF8Encoding(false, true);
+    private static readonly System.Text.Encoding DisplayUtf8 = new System.Text.UTF8Encoding(false, false);
     private static readonly IReadOnlyList<AlphabetPreset> Presets = new[]
     {
         new AlphabetPreset("binary", "Binario", AnyBaseAlphabets.Binary),
@@ -159,11 +210,19 @@
         typeof(Base<>).Assembly.GetName().Version?.ToString(3) ?? "dev";
     private string Alphabet { get; set; } = AnyBaseAlphabets.Hexadecimal;
     private string Separator { get; set; } = string.Empty;
-    private string Input { get; set; } = "Ciao, mondo 🌍";
-    private string Output { get; set; } = string.Empty;
-    private string Message { get; set; } = "Pronto: scegli una modalità e trasforma il testo.";
+    private byte[] InputBytes { get; set; } = StrictUtf8.GetBytes("Ciao, mondo 🌍");
+    private byte[] OutputBytes { get; set; } = Array.Empty<byte>();
+    private string InputDisplay { get; set; } = "Ciao, mondo 🌍";
+    private string? LoadedFileName { get; set; }
+    private string Message { get; set; } = "Pronto: inserisci testo, byte o carica un file.";
     private bool HasError { get; set; }
+    private bool HasOutput { get; set; }
+    private bool InputIsPreview { get; set; }
+    private bool InputDisplayIsDirty { get; set; }
+    private int LastInputSize { get; set; }
     private TransformMode Mode { get; set; } = TransformMode.Encode;
+    private DataView InputView { get; set; } = DataView.Text;
+    private DataView OutputView { get; set; } = DataView.Text;
 
     private AlphabetValidationResult CurrentValidation => string.IsNullOrEmpty(Separator)
         ? AlphabetValidator.Validate(Alphabet)
@@ -181,9 +240,26 @@
         ? "I simboli possono essere concatenati senza ambiguità."
         : $"I simboli saranno separati da “{Separator}”.";
 
+    private string OutputDisplay => HasOutput
+        ? RenderBytes(OutputBytes, OutputView, out _)
+        : string.Empty;
+
+    private bool OutputIsPreview => HasOutput && OutputView switch
+    {
+        DataView.Text => DisplayUtf8.GetCharCount(OutputBytes) > TextPreviewCharacters,
+        DataView.Hex => OutputBytes.Length > HexPreviewBytes,
+        DataView.Bytes => OutputBytes.Length > BytePreviewBytes,
+        _ => false
+    };
+
+    private string ExpansionRatio => LastInputSize == 0
+        ? "—"
+        : $"{(double)OutputBytes.Length / LastInputSize:0.00}×";
+
     protected override void OnInitialized()
     {
         ApplyConfigurationFromUrl();
+        RenderInput();
     }
 
     private void PresetChanged()
@@ -194,7 +270,7 @@
             Alphabet = preset.Alphabet;
         }
 
-        ClearResult();
+        ClearResult("Configurazione aggiornata.");
     }
 
     private void UseCustomPreset()
@@ -205,39 +281,100 @@
     private void SetMode(TransformMode mode)
     {
         Mode = mode;
-        Output = string.Empty;
-        Message = mode == TransformMode.Encode
-            ? "Inserisci testo UTF-8 da codificare."
-            : "Incolla una sequenza prodotta con lo stesso alfabeto e separatore.";
-        HasError = false;
+        ClearResult(mode == TransformMode.Encode
+            ? "I byte di input saranno trasformati nei simboli dell’alfabeto."
+            : "L’input deve contenere simboli codificati con lo stesso alfabeto e separatore.");
     }
 
-    private void Transform()
+    private void UpdateInputDisplay(ChangeEventArgs args)
+    {
+        InputDisplay = args.Value?.ToString() ?? string.Empty;
+        InputDisplayIsDirty = true;
+        InputIsPreview = false;
+        LoadedFileName = null;
+        ClearResult("Input modificato.");
+    }
+
+    private void SetInputView(DataView view)
     {
         try
         {
+            CommitInputDisplay();
+            InputView = view;
+            RenderInput();
+            HasError = false;
+            Message = $"Vista input: {ViewName(view)}.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException or EncoderFallbackException)
+        {
+            Message = exception.Message;
+            HasError = true;
+        }
+    }
+
+    private void SetOutputView(DataView view)
+    {
+        OutputView = view;
+        Message = $"Vista risultato: {ViewName(view)}.";
+        HasError = false;
+    }
+
+    private async Task LoadFile(InputFileChangeEventArgs args)
+    {
+        try
+        {
+            var file = args.File;
+            await using var source = file.OpenReadStream(MaximumFileSize);
+            using var target = new MemoryStream();
+            await source.CopyToAsync(target);
+            InputBytes = target.ToArray();
+            LoadedFileName = file.Name;
+            InputDisplayIsDirty = false;
+            RenderInput();
+            ClearResult($"Caricato {file.Name}: {FormatBytes(InputBytes.Length)}.");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            Message = exception.Message;
+            HasError = true;
+        }
+    }
+
+    private async Task Transform()
+    {
+        try
+        {
+            CommitInputDisplay();
             var converter = AnyBase.Create(Alphabet);
-            Output = Mode switch
+            using var input = new MemoryStream(InputBytes, writable: false);
+            using var output = new MemoryStream();
+            var separator = string.IsNullOrEmpty(Separator) ? null : Separator;
+
+            if (Mode == TransformMode.Encode)
             {
-                TransformMode.Encode when !string.IsNullOrEmpty(Separator) =>
-                    converter.EncodeToString(Input, Separator),
-                TransformMode.Decode when !string.IsNullOrEmpty(Separator) =>
-                    converter.DecodeToString(Input, Separator),
-                TransformMode.Encode => converter.EncodeToString(Input),
-                _ => converter.DecodeToString(Input)
-            };
-            Message = Mode == TransformMode.Encode
-                ? $"{System.Text.Encoding.UTF8.GetByteCount(Input)} byte → {Output.Length} caratteri"
-                : $"{Input.Length} caratteri → {System.Text.Encoding.UTF8.GetByteCount(Output)} byte";
+                await converter.EncodeAsync(input, output, separator);
+                OutputView = DataView.Text;
+            }
+            else
+            {
+                await converter.DecodeAsync(input, output, separator);
+            }
+
+            OutputBytes = output.ToArray();
+            LastInputSize = InputBytes.Length;
+            HasOutput = true;
+            Message = $"{FormatBytes(LastInputSize)} → {FormatBytes(OutputBytes.Length)} ({ExpansionRatio}).";
             HasError = false;
         }
         catch (Exception exception) when (exception is
             ArgumentException or
             FormatException or
             InvalidOperationException or
-            DecoderFallbackException)
+            DecoderFallbackException or
+            EncoderFallbackException)
         {
-            Output = string.Empty;
+            OutputBytes = Array.Empty<byte>();
+            HasOutput = false;
             Message = exception.Message;
             HasError = true;
         }
@@ -245,24 +382,41 @@
 
     private void Swap()
     {
-        if (string.IsNullOrEmpty(Output))
+        if (!HasOutput)
         {
             return;
         }
 
-        Input = Output;
+        InputBytes = OutputBytes.ToArray();
+        InputView = OutputView;
+        InputDisplayIsDirty = false;
+        LoadedFileName = null;
+        RenderInput();
         Mode = Mode == TransformMode.Encode ? TransformMode.Decode : TransformMode.Encode;
-        Transform();
+        ClearResult("Risultato spostato nell’input.");
     }
 
     private async Task Copy()
     {
-        if (string.IsNullOrEmpty(Output))
+        if (!HasOutput)
         {
             return;
         }
 
-        await CopyToClipboard(Output, "Risultato copiato negli appunti.");
+        await CopyToClipboard(OutputDisplay, "Vista del risultato copiata negli appunti.");
+    }
+
+    private async Task Download()
+    {
+        if (!HasOutput)
+        {
+            return;
+        }
+
+        var fileName = DownloadFileName();
+        await JavaScript.InvokeVoidAsync("anyBase.download", fileName, OutputBytes);
+        Message = $"Download avviato: {fileName}.";
+        HasError = false;
     }
 
     private async Task ShareConfiguration()
@@ -283,6 +437,8 @@
         }
 
         parameters.Add($"mode={Mode.ToString().ToLowerInvariant()}");
+        parameters.Add($"inputView={InputView.ToString().ToLowerInvariant()}");
+        parameters.Add($"outputView={OutputView.ToString().ToLowerInvariant()}");
         var uri = new Uri(Navigation.Uri);
         var shareUrl = uri.GetLeftPart(UriPartial.Path) + "?" + string.Join("&", parameters);
         Navigation.NavigateTo(shareUrl, replace: true);
@@ -302,6 +458,85 @@
             Message = "Il browser non ha consentito l’accesso agli appunti.";
             HasError = true;
         }
+    }
+
+    private void CommitInputDisplay()
+    {
+        if (!InputDisplayIsDirty)
+        {
+            return;
+        }
+
+        InputBytes = InputView switch
+        {
+            DataView.Text => StrictUtf8.GetBytes(InputDisplay),
+            DataView.Hex => ParseHex(InputDisplay),
+            DataView.Bytes => ParseBytes(InputDisplay),
+            _ => throw new InvalidOperationException("Vista input non supportata.")
+        };
+        InputDisplayIsDirty = false;
+    }
+
+    private void RenderInput()
+    {
+        InputDisplay = RenderBytes(InputBytes, InputView, out var preview);
+        InputIsPreview = preview;
+        InputDisplayIsDirty = false;
+    }
+
+    private static string RenderBytes(byte[] bytes, DataView view, out bool preview)
+    {
+        switch (view)
+        {
+            case DataView.Text:
+                var text = DisplayUtf8.GetString(bytes);
+                preview = text.Length > TextPreviewCharacters;
+                return preview ? text[..TextPreviewCharacters] : text;
+            case DataView.Hex:
+                preview = bytes.Length > HexPreviewBytes;
+                return Convert.ToHexString(bytes.AsSpan(0, Math.Min(bytes.Length, HexPreviewBytes)));
+            case DataView.Bytes:
+                preview = bytes.Length > BytePreviewBytes;
+                return string.Join(" ", bytes.Take(BytePreviewBytes));
+            default:
+                preview = false;
+                return string.Empty;
+        }
+    }
+
+    private static byte[] ParseHex(string value)
+    {
+        var compact = new string(value.Where(character => !char.IsWhiteSpace(character)).ToArray());
+        if (compact.Length % 2 != 0)
+        {
+            throw new FormatException("La vista esadecimale richiede un numero pari di cifre.");
+        }
+
+        try
+        {
+            return Convert.FromHexString(compact);
+        }
+        catch (FormatException)
+        {
+            throw new FormatException("La vista esadecimale contiene caratteri non validi.");
+        }
+    }
+
+    private static byte[] ParseBytes(string value)
+    {
+        var tokens = value.Split(
+            new[] { ' ', '\t', '\r', '\n', ',', ';' },
+            StringSplitOptions.RemoveEmptyEntries);
+        var bytes = new byte[tokens.Length];
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            if (!byte.TryParse(tokens[index], out bytes[index]))
+            {
+                throw new FormatException($"'{tokens[index]}' non è un byte decimale compreso tra 0 e 255.");
+            }
+        }
+
+        return bytes;
     }
 
     private void ApplyConfigurationFromUrl()
@@ -333,6 +568,18 @@
         {
             Mode = parsedMode;
         }
+
+        if (query.TryGetValue("inputView", out var inputView) &&
+            Enum.TryParse<DataView>(inputView, ignoreCase: true, out var parsedInputView))
+        {
+            InputView = parsedInputView;
+        }
+
+        if (query.TryGetValue("outputView", out var outputView) &&
+            Enum.TryParse<DataView>(outputView, ignoreCase: true, out var parsedOutputView))
+        {
+            OutputView = parsedOutputView;
+        }
     }
 
     private static IReadOnlyDictionary<string, string> ParseQuery(string query)
@@ -350,12 +597,49 @@
         return values;
     }
 
-    private void ClearResult()
+    private string DownloadFileName()
     {
-        Output = string.Empty;
-        Message = "Configurazione aggiornata.";
+        var sourceName = string.IsNullOrWhiteSpace(LoadedFileName) ? "anybase-result" : LoadedFileName;
+        if (Mode == TransformMode.Encode)
+        {
+            return sourceName + ".anybase";
+        }
+
+        return sourceName.EndsWith(".anybase", StringComparison.OrdinalIgnoreCase)
+            ? sourceName[..^8]
+            : sourceName + ".decoded";
+    }
+
+    private static string FormatBytes(int length)
+    {
+        if (length < 1024)
+        {
+            return $"{length} B";
+        }
+
+        if (length < 1024 * 1024)
+        {
+            return $"{length / 1024d:0.##} KiB";
+        }
+
+        return $"{length / (1024d * 1024d):0.##} MiB";
+    }
+
+    private void ClearResult(string message)
+    {
+        OutputBytes = Array.Empty<byte>();
+        HasOutput = false;
+        Message = message;
         HasError = false;
     }
+
+    private static string ViewName(DataView view) => view switch
+    {
+        DataView.Text => "Testo",
+        DataView.Hex => "Hex",
+        DataView.Bytes => "Byte",
+        _ => view.ToString()
+    };
 
     private sealed record AlphabetPreset(string Key, string Name, string Alphabet);
 
@@ -363,5 +647,12 @@
     {
         Encode,
         Decode
+    }
+
+    private enum DataView
+    {
+        Text,
+        Hex,
+        Bytes
     }
 }

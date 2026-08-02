@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnyBase.Net.Tool", "AnyBase
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnyBase.Net.Playground", "AnyBase.Net.Playground\AnyBase.Net.Playground.csproj", "{258863EF-43EF-40E6-BAEF-14C8B515AE00}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnyBase.Net.Benchmarks", "AnyBase.Net.Benchmarks\AnyBase.Net.Benchmarks.csproj", "{9A88CB70-BDF3-49C6-B149-61E18F900215}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -35,5 +37,9 @@ Global
 		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{258863EF-43EF-40E6-BAEF-14C8B515AE00}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9A88CB70-BDF3-49C6-B149-61E18F900215}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9A88CB70-BDF3-49C6-B149-61E18F900215}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9A88CB70-BDF3-49C6-B149-61E18F900215}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9A88CB70-BDF3-49C6-B149-61E18F900215}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

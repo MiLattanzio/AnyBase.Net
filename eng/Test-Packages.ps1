@@ -73,7 +73,23 @@ using AnyBase.Net;
 using AnyBaseFactory = global::AnyBase.Net.AnyBase;
 
 var hexadecimal = AnyBaseFactory.CreateHex();
-Console.Write(hexadecimal.EncodeToString("A", "-"));
+var source = new byte[] { 0x00, 0x0A, 0xFF };
+var encoded = new char[hexadecimal.GetEncodedLength(source.Length)];
+var symbolsWritten = hexadecimal.Encode(source, encoded);
+var decoded = new byte[hexadecimal.GetDecodedLength(symbolsWritten)];
+hexadecimal.Decode(encoded, decoded);
+
+using var streamInput = new MemoryStream(source);
+using var streamEncoded = new MemoryStream();
+await hexadecimal.EncodeAsync(streamInput, streamEncoded, bufferSize: 1);
+streamEncoded.Position = 0;
+using var streamDecoded = new MemoryStream();
+await hexadecimal.DecodeAsync(streamEncoded, streamDecoded, bufferSize: 1);
+
+Console.Write(
+    $"{new string(encoded)}|{Convert.ToHexString(decoded)}|" +
+    $"{System.Text.Encoding.ASCII.GetString(streamEncoded.ToArray())}|" +
+    Convert.ToHexString(streamDecoded.ToArray()));
 '@
     [IO.File]::WriteAllText(
         (Join-Path $consumerDirectory 'Program.cs'),
@@ -100,8 +116,9 @@ Console.Write(hexadecimal.EncodeToString("A", "-"));
 
     $consumerAssembly = Join-Path $consumerDirectory 'bin/Release/net8.0/PackageConsumer.dll'
     $consumerOutput = (& dotnet $consumerAssembly | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $consumerOutput -ne '4-1') {
-        throw "The library package smoke test returned '$consumerOutput' instead of '4-1'."
+    $expectedConsumerOutput = '000AFF|000AFF|000AFF|000AFF'
+    if ($LASTEXITCODE -ne 0 -or $consumerOutput -ne $expectedConsumerOutput) {
+        throw "The library package smoke test returned '$consumerOutput' instead of '$expectedConsumerOutput'."
     }
 
     Invoke-DotNet -Arguments @(
@@ -119,6 +136,43 @@ Console.Write(hexadecimal.EncodeToString("A", "-"));
     $toolOutput = (& $toolPath encode A --alphabet hex --separator '-' | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $toolOutput -ne '4-1') {
         throw "The CLI package smoke test returned '$toolOutput' instead of '4-1'."
+    }
+
+    $binaryInputPath = Join-Path $testRoot 'input.bin'
+    $encodedOutputPath = Join-Path $testRoot 'encoded.bin'
+    $decodedOutputPath = Join-Path $testRoot 'decoded.bin'
+    [IO.File]::WriteAllBytes($binaryInputPath, [byte[]]@(0, 10, 13, 255))
+
+    & $toolPath encode `
+        --input $binaryInputPath `
+        --input-format binary `
+        --output $encodedOutputPath `
+        --output-format binary `
+        --alphabet hex
+    if ($LASTEXITCODE -ne 0) {
+        throw "The CLI binary encoding smoke test failed with exit code $LASTEXITCODE."
+    }
+
+    $encodedOutput = [Text.Encoding]::ASCII.GetString(
+        [IO.File]::ReadAllBytes($encodedOutputPath))
+    if ($encodedOutput -cne '000A0DFF') {
+        throw "The CLI binary encoding smoke test returned '$encodedOutput' instead of '000A0DFF'."
+    }
+
+    & $toolPath decode `
+        --input $encodedOutputPath `
+        --input-format binary `
+        --output $decodedOutputPath `
+        --output-format binary `
+        --alphabet hex
+    if ($LASTEXITCODE -ne 0) {
+        throw "The CLI binary decoding smoke test failed with exit code $LASTEXITCODE."
+    }
+
+    $decodedOutput = [IO.File]::ReadAllBytes($decodedOutputPath)
+    $decodedOutputHex = ($decodedOutput | ForEach-Object { $_.ToString('X2') }) -join ''
+    if ($decodedOutputHex -cne '000A0DFF') {
+        throw "The CLI binary decoding smoke test returned '$decodedOutputHex' instead of '000A0DFF'."
     }
 
     Write-Output "Package smoke tests passed for AnyBase.Net $Version and AnyBase.Net.Tool $Version."

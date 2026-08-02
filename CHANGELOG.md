@@ -4,7 +4,33 @@ Le modifiche rilevanti di AnyBase.Net sono documentate in questo file.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/)
 e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 
-## [1.2.0] - Unreleased
+## [1.3.0] - Unreleased
+
+### Added
+
+- API `ReadOnlySpan<T>`, `Span<T>`, `ReadOnlyMemory<T>` e `Memory<T>` per
+  codifica e decodifica senza allocazioni intermedie obbligatorie.
+- Calcolo esatto delle dimensioni di simboli, byte e testo codificato prima
+  dell'allocazione dell'output.
+- Codifica e decodifica incrementale di `Stream`, sincrona e asincrona, con
+  memoria limitata, `CancellationToken` e stream lasciati aperti.
+- Progetto BenchmarkDotNet per confrontare API ad array e buffer; la CI
+  pubblica report Markdown e artefatti per ogni commit.
+- Modalità binaria reale nella CLI, con stdin/stdout e file raw, formati
+  `text`, `binary` ed `hex` e nessun newline aggiunto all'output binario.
+- Caricamento file, viste testo/esadecimale/byte, download del risultato,
+  dimensioni e rapporto di espansione nel playground WebAssembly.
+- Test di dimensionamento, buffer, stream sincroni/asincroni, cancellazione e
+  flussi binari end-to-end della CLI e dei pacchetti.
+
+### Changed
+
+- I percorsi ad array usano le nuove primitive basate su span.
+- Lo smoke test del global tool verifica byte non testuali senza conversione
+  UTF-8 e senza newline indesiderati.
+- La validazione del pacchetto mantiene come baseline pubblicata la 1.1.1.
+
+## [1.2.0] - 2026-08-02
 
 ### Added
 
@@ -62,6 +88,7 @@ e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 - Aggiornamento a NumeralSystems.Net 5.3.0.
 - Round-trip UTF-8, alfabeti ordinati deterministici e validazione più rigorosa.
 
-[1.2.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.1...HEAD
+[1.3.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/MiLattanzio/AnyBase.Net/releases/tag/v1.1.0

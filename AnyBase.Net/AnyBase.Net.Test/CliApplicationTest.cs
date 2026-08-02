@@ -66,6 +66,72 @@ public class CliApplicationTest
     }
 
     [Test]
+    public async Task RunAsync_BinaryEncode_WritesExactBytesWithoutNewline()
+    {
+        var source = new byte[] { 0, 10, 13, 255 };
+
+        var result = await RunBinaryAsync(
+            source,
+            "encode",
+            "--alphabet", "hex",
+            "--input-format", "binary",
+            "--output-format", "binary");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Zero);
+            Assert.That(result.Output, Is.EqualTo("000A0DFF"u8.ToArray()));
+            Assert.That(result.Output, Has.Length.EqualTo(8));
+            Assert.That(result.Error, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_BinaryDecode_PreservesArbitraryBytes()
+    {
+        var encoded = "000A0DFF"u8.ToArray();
+
+        var result = await RunBinaryAsync(
+            encoded,
+            "decode",
+            "--alphabet", "hex",
+            "--input-format", "binary",
+            "--output-format", "binary");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Zero);
+            Assert.That(result.Output, Is.EqualTo(new byte[] { 0, 10, 13, 255 }));
+            Assert.That(result.Error, Is.Empty);
+        });
+    }
+
+    [TestCase("encode", "00 FF", "hex", "binary", "00FF")]
+    [TestCase("decode", "41", "text", "hex", "41\n")]
+    public async Task RunAsync_ConvertsHexFormats(
+        string command,
+        string value,
+        string inputFormat,
+        string outputFormat,
+        string expected)
+    {
+        var result = await RunBinaryAsync(
+            null,
+            command,
+            value,
+            "--alphabet", "hex",
+            "--input-format", inputFormat,
+            "--output-format", outputFormat);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Zero);
+            Assert.That(result.Output, Is.EqualTo(System.Text.Encoding.ASCII.GetBytes(expected)));
+            Assert.That(result.Error, Is.Empty);
+        });
+    }
+
+    [Test]
     public async Task RunAsync_ReadsAndWritesUtf8Files()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"anybase-tests-{Guid.NewGuid():N}");
@@ -104,6 +170,10 @@ public class CliApplicationTest
     [TestCase("encode", "A", "--alphabet", "hex", "--separator", "A")]
     [TestCase("encode", "A", "--alphabet", "hex", "--separator", "")]
     [TestCase("encode", "A", "--base", "16", "--alphabet", "01")]
+    [TestCase("encode", "A", "--input-format", "binary")]
+    [TestCase("encode", "A", "--input-format", "json")]
+    [TestCase("encode", "A", "--output-format", "base64")]
+    [TestCase("encode", "ABC", "--input-format", "hex")]
     [TestCase("decode", "4Z", "--base", "16")]
     public async Task RunAsync_InvalidInput_ReturnsUsageError(params string[] args)
     {
@@ -143,5 +213,16 @@ public class CliApplicationTest
         return new CliResult(exitCode, output.ToString(), error.ToString());
     }
 
+    private static async Task<BinaryCliResult> RunBinaryAsync(byte[]? input, params string[] args)
+    {
+        using var inputStream = input == null ? null : new MemoryStream(input, writable: false);
+        using var output = new MemoryStream();
+        var error = new StringWriter();
+        var exitCode = await CliApplication.RunAsync(args, inputStream, output, error);
+        return new BinaryCliResult(exitCode, output.ToArray(), error.ToString());
+    }
+
     private sealed record CliResult(int ExitCode, string Output, string Error);
+
+    private sealed record BinaryCliResult(int ExitCode, byte[] Output, string Error);
 }
