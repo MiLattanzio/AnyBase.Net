@@ -127,6 +127,19 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mode-switch button { border: 0; padding: 9px 13px; color: var(--muted); background: transparent; cursor: pointer; }
 .mode-switch button.active { color: #10150f; background: var(--accent); }
 
+.file-loader { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px; border: 1px dashed var(--line); background: #101513; }
+.file-loader strong, .file-loader span { display: block; }
+.file-loader strong { margin-bottom: 4px; font-size: 0.85rem; }
+.file-loader span { color: var(--muted); font-size: 0.72rem; }
+.file-loader input[type="file"] { width: min(230px, 48%); border: 0; color: var(--muted); background: transparent; font-size: 0.72rem; }
+.file-loader input[type="file"]::file-selector-button { margin-right: 10px; padding: 9px 11px; border: 1px solid var(--line); color: var(--ink); background: var(--surface-high); cursor: pointer; }
+.view-header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-top: 24px; }
+.view-header label { flex: 1; margin-bottom: 10px; }
+.view-switch { display: flex; padding: 3px; border: 1px solid var(--line); background: #0f1512; }
+.view-switch button { border: 0; padding: 7px 9px; color: var(--muted); background: transparent; cursor: pointer; font-size: 0.7rem; }
+.view-switch button.active { color: #10150f; background: var(--accent); }
+.preview-note { margin: 8px 0 0; color: var(--muted); font: 0.7rem/1.4 ui-monospace, monospace; }
+
 .primary-action {
     width: 100%;
     display: flex;
@@ -144,9 +157,18 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .primary-action:disabled { border-color: var(--line); color: #778078; background: var(--surface-high); cursor: not-allowed; }
 .output-header { display: flex; align-items: end; justify-content: space-between; margin-top: 28px; }
 .output-header label { flex: 1; margin-bottom: 10px; }
+.transfer-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 18px; border: 1px solid var(--line); background: #101513; }
+.transfer-stats div { padding: 13px 15px; border-right: 1px solid var(--line); }
+.transfer-stats div:last-child { border-right: 0; }
+.transfer-stats span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.transfer-stats strong { font: 650 0.86rem/1 ui-monospace, monospace; }
+.result-actions { display: flex; justify-content: flex-end; align-items: center; gap: 5px; margin-top: 10px; }
 .text-button { border: 0; padding: 8px; color: var(--muted); background: transparent; cursor: pointer; font-size: 0.78rem; }
 .text-button:hover:not(:disabled) { color: var(--accent); }
 .text-button:disabled { opacity: 0.35; cursor: default; }
+.download-action { margin-left: 8px; padding: 9px 12px; border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer; font-size: 0.75rem; }
+.download-action:hover:not(:disabled) { color: #10150f; background: var(--accent); }
+.download-action:disabled { border-color: var(--line); color: var(--muted); opacity: 0.35; cursor: default; }
 .message { margin: 14px 0 0; font: 500 0.78rem/1.5 ui-monospace, monospace; }
 .message.success { color: var(--success); }
 .message.error { color: var(--danger); }
@@ -174,6 +196,8 @@ footer { display: flex; justify-content: space-between; gap: 24px; padding: 30px
     .converter-heading { flex-wrap: wrap; }
     .mode-switch { width: 100%; margin: 4px 0 0 34px; }
     .mode-switch button { flex: 1; }
+    .view-header { align-items: stretch; flex-direction: column; gap: 0; }
+    .view-switch { align-self: flex-end; }
 }
 
 @media (max-width: 560px) {
@@ -184,7 +208,12 @@ footer { display: flex; justify-content: space-between; gap: 24px; padding: 30px
     .hero h1 { font-size: clamp(3rem, 15vw, 5rem); }
     .control-panel, .converter-panel { padding: 30px 20px; }
     .section-heading { margin-bottom: 30px; }
+    .file-loader { align-items: flex-start; flex-direction: column; }
+    .file-loader input[type="file"] { width: 100%; }
     .stats span { min-height: 40px; }
+    .transfer-stats div { padding: 12px 9px; }
+    .result-actions { align-items: stretch; flex-direction: column; }
+    .download-action { margin-left: 0; }
     footer { flex-direction: column; gap: 2px; }
 }
 

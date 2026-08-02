@@ -4,20 +4,22 @@ using System.Text;
 namespace AnyBase.Net.Tool;
 
 /// <summary>
-/// Parses command-line arguments and runs AnyBase.Net text transformations.
+/// Parses command-line arguments and runs AnyBase.Net transformations.
 /// </summary>
 public static class CliApplication
 {
+    private const int StreamBufferSize = 81920;
     private const string DefaultAlphabet =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
     /// <summary>
-    /// Runs the command-line application using the supplied streams.
+    /// Runs the command-line application using binary standard streams.
     /// </summary>
     /// <param name="args">The command-line arguments.</param>
-    /// <param name="standardInput">The redirected input, or <see langword="null"/> when unavailable.</param>
-    /// <param name="standardOutput">The destination for successful output.</param>
-    /// <param name="standardError">The destination for diagnostics.</param>
+    /// <param name="standardInput">The redirected input stream, or <see langword="null"/> when unavailable.</param>
+    /// <param name="standardOutput">The binary-safe standard output stream.</param>
+    /// <param name="standardError">The destination for textual diagnostics.</param>
     /// <param name="cancellationToken">A token used to cancel file and stream operations.</param>
     /// <returns>Zero on success, or two for invalid input and operational errors.</returns>
     /// <exception cref="ArgumentNullException">
@@ -25,6 +27,88 @@ public static class CliApplication
     /// <paramref name="standardError"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
+    public static async Task<int> RunAsync(
+        string[] args,
+        Stream? standardInput,
+        Stream standardOutput,
+        TextWriter standardError,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+
+        if (!standardOutput.CanWrite)
+        {
+            throw new ArgumentException("Standard output stream must be writable.", nameof(standardOutput));
+        }
+
+        if (args.Length == 0 || args is ["--help"] or ["-h"])
+        {
+            await WriteUtf8Async(standardOutput, HelpText, appendNewline: true, cancellationToken);
+            return 0;
+        }
+
+        if (args is ["--version"])
+        {
+            var version = typeof(CliApplication).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+            await WriteUtf8Async(standardOutput, version, appendNewline: true, cancellationToken);
+            return 0;
+        }
+
+        try
+        {
+            var options = Parse(args);
+            if (options.HelpRequested)
+            {
+                await WriteUtf8Async(
+                    standardOutput,
+                    CommandHelp(options.Command),
+                    appendNewline: true,
+                    cancellationToken);
+                return 0;
+            }
+
+            var alphabet = ResolveAlphabet(options);
+            var codec = new Base<char>(alphabet);
+            await using var input = await ResolveInputAsync(options, standardInput, cancellationToken);
+
+            if (options.OutputFormat == DataFormat.Binary)
+            {
+                await using var output = OpenOutput(options, standardOutput);
+                await TransformAsync(codec, options, input.Stream, output.Stream, cancellationToken);
+                await output.Stream.FlushAsync(cancellationToken);
+            }
+            else
+            {
+                using var transformed = new MemoryStream();
+                await TransformAsync(codec, options, input.Stream, transformed, cancellationToken);
+                await WriteFormattedOutputAsync(
+                    options,
+                    transformed.ToArray(),
+                    standardOutput,
+                    cancellationToken);
+            }
+
+            return 0;
+        }
+        catch (Exception exception) when (exception is
+            CliException or
+            ArgumentException or
+            FormatException or
+            DecoderFallbackException or
+            InvalidOperationException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            await standardError.WriteLineAsync($"error: {exception.Message}");
+            return 2;
+        }
+    }
+
+    /// <summary>
+    /// Runs the CLI through text adapters retained for compatibility with existing hosts and tests.
+    /// </summary>
     public static async Task<int> RunAsync(
         string[] args,
         TextReader? standardInput,
@@ -36,61 +120,24 @@ public static class CliApplication
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
 
-        if (args.Length == 0 || args is ["--help"] or ["-h"])
+        MemoryStream? input = null;
+        if (standardInput != null)
         {
-            await standardOutput.WriteLineAsync(HelpText);
-            return 0;
+            var text = await standardInput.ReadToEndAsync(cancellationToken);
+            input = new MemoryStream(StrictUtf8.GetBytes(text), writable: false);
         }
 
-        if (args is ["--version"])
+        using (input)
+        using (var output = new MemoryStream())
         {
-            var version = typeof(CliApplication).Assembly.GetName().Version?.ToString(3) ?? "unknown";
-            await standardOutput.WriteLineAsync(version);
-            return 0;
-        }
-
-        try
-        {
-            var options = Parse(args);
-            if (options.HelpRequested)
+            var exitCode = await RunAsync(args, input, output, standardError, cancellationToken);
+            if (output.Length > 0)
             {
-                await standardOutput.WriteLineAsync(CommandHelp(options.Command));
-                return 0;
+                var text = StrictUtf8.GetString(output.ToArray());
+                await standardOutput.WriteAsync(text);
             }
 
-            var alphabet = ResolveAlphabet(options);
-            var input = await ResolveInputAsync(options, standardInput, cancellationToken);
-            var encoder = new Base<char>(alphabet);
-            var result = options.Command switch
-            {
-                "encode" when options.Separator != null => encoder.EncodeToString(input, options.Separator),
-                "decode" when options.Separator != null => encoder.DecodeToString(input, options.Separator),
-                "encode" => encoder.EncodeToString(input),
-                "decode" => encoder.DecodeToString(input),
-                _ => throw new CliException($"Unknown command '{options.Command}'.")
-            };
-
-            if (options.OutputPath == null || options.OutputPath == "-")
-            {
-                await standardOutput.WriteLineAsync(result);
-            }
-            else
-            {
-                await File.WriteAllTextAsync(options.OutputPath, result, new UTF8Encoding(false), cancellationToken);
-            }
-
-            return 0;
-        }
-        catch (Exception exception) when (exception is
-            CliException or
-            ArgumentException or
-            FormatException or
-            DecoderFallbackException or
-            IOException or
-            UnauthorizedAccessException)
-        {
-            await standardError.WriteLineAsync($"error: {exception.Message}");
-            return 2;
+            return exitCode;
         }
     }
 
@@ -108,6 +155,8 @@ public static class CliApplication
         string? inputPath = null;
         string? outputPath = null;
         string? separator = null;
+        var inputFormat = DataFormat.Text;
+        var outputFormat = DataFormat.Text;
         var helpRequested = false;
 
         for (var index = 1; index < args.Length; index++)
@@ -144,6 +193,12 @@ public static class CliApplication
                 case "--separator":
                     separator = ReadOptionValue(args, ref index);
                     break;
+                case "--input-format":
+                    inputFormat = ParseFormat(ReadOptionValue(args, ref index), "--input-format");
+                    break;
+                case "--output-format":
+                    outputFormat = ParseFormat(ReadOptionValue(args, ref index), "--output-format");
+                    break;
                 default:
                     if (args[index].StartsWith("-", StringComparison.Ordinal))
                     {
@@ -170,6 +225,11 @@ public static class CliApplication
             throw new CliException("A positional value cannot be combined with --input.");
         }
 
+        if (value != null && inputFormat == DataFormat.Binary)
+        {
+            throw new CliException("Binary input must come from --input FILE or redirected standard input.");
+        }
+
         return new CliOptions(
             command,
             value,
@@ -178,7 +238,20 @@ public static class CliApplication
             inputPath,
             outputPath,
             separator,
+            inputFormat,
+            outputFormat,
             helpRequested);
+    }
+
+    private static DataFormat ParseFormat(string value, string option)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "text" => DataFormat.Text,
+            "binary" => DataFormat.Binary,
+            "hex" => DataFormat.Hex,
+            _ => throw new CliException($"{option} must be text, binary, or hex; found '{value}'.")
+        };
     }
 
     private static string ReadOptionValue(string[] args, ref int index)
@@ -225,19 +298,37 @@ public static class CliApplication
         }
     }
 
-    private static async Task<string> ResolveInputAsync(
+    private static async Task<StreamHandle> ResolveInputAsync(
         CliOptions options,
-        TextReader? standardInput,
+        Stream? standardInput,
         CancellationToken cancellationToken)
     {
         if (options.Value != null)
         {
-            return options.Value;
+            var bytes = options.InputFormat switch
+            {
+                DataFormat.Text => StrictUtf8.GetBytes(options.Value),
+                DataFormat.Hex => ParseHex(options.Value),
+                _ => throw new CliException("Binary input cannot be supplied as a positional value.")
+            };
+            return StreamHandle.Owned(new MemoryStream(bytes, writable: false));
         }
 
         if (options.InputPath is { } inputPath && inputPath != "-")
         {
-            return await File.ReadAllTextAsync(inputPath, cancellationToken);
+            if (options.InputFormat == DataFormat.Binary)
+            {
+                return StreamHandle.Owned(new FileStream(
+                    inputPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    StreamBufferSize,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan));
+            }
+
+            var fileBytes = await File.ReadAllBytesAsync(inputPath, cancellationToken);
+            return StreamHandle.Owned(new MemoryStream(ConvertInput(fileBytes, options.InputFormat), writable: false));
         }
 
         if (standardInput == null)
@@ -245,7 +336,138 @@ public static class CliApplication
             throw new CliException("Provide a value, --input FILE, or redirected standard input.");
         }
 
-        return await standardInput.ReadToEndAsync(cancellationToken);
+        if (options.InputFormat == DataFormat.Binary)
+        {
+            return StreamHandle.Borrowed(standardInput);
+        }
+
+        var redirectedBytes = await ReadAllBytesAsync(standardInput, cancellationToken);
+        return StreamHandle.Owned(
+            new MemoryStream(ConvertInput(redirectedBytes, options.InputFormat), writable: false));
+    }
+
+    private static byte[] ConvertInput(byte[] source, DataFormat format)
+    {
+        if (format == DataFormat.Text)
+        {
+            StrictUtf8.GetString(source);
+            return source;
+        }
+
+        if (format == DataFormat.Hex)
+        {
+            return ParseHex(StrictUtf8.GetString(source));
+        }
+
+        return source;
+    }
+
+    private static byte[] ParseHex(string value)
+    {
+        var compact = new string(value.Where(character => !char.IsWhiteSpace(character)).ToArray());
+        if (compact.Length % 2 != 0)
+        {
+            throw new CliException($"Hex input must contain an even number of digits; found {compact.Length}.");
+        }
+
+        try
+        {
+            return Convert.FromHexString(compact);
+        }
+        catch (FormatException exception)
+        {
+            throw new CliException($"Hex input is invalid: {exception.Message}");
+        }
+    }
+
+    private static StreamHandle OpenOutput(CliOptions options, Stream standardOutput)
+    {
+        if (options.OutputPath == null || options.OutputPath == "-")
+        {
+            return StreamHandle.Borrowed(standardOutput);
+        }
+
+        return StreamHandle.Owned(new FileStream(
+            options.OutputPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            StreamBufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan));
+    }
+
+    private static Task TransformAsync(
+        Base<char> codec,
+        CliOptions options,
+        Stream input,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        return options.Command switch
+        {
+            "encode" => codec.EncodeAsync(
+                input,
+                output,
+                options.Separator,
+                StreamBufferSize,
+                cancellationToken),
+            "decode" => codec.DecodeAsync(
+                input,
+                output,
+                options.Separator,
+                StreamBufferSize,
+                cancellationToken),
+            _ => throw new CliException($"Unknown command '{options.Command}'.")
+        };
+    }
+
+    private static async Task WriteFormattedOutputAsync(
+        CliOptions options,
+        byte[] transformed,
+        Stream standardOutput,
+        CancellationToken cancellationToken)
+    {
+        byte[] outputBytes;
+        switch (options.OutputFormat)
+        {
+            case DataFormat.Text:
+                StrictUtf8.GetString(transformed);
+                outputBytes = transformed;
+                break;
+            case DataFormat.Hex:
+                outputBytes = Encoding.ASCII.GetBytes(Convert.ToHexString(transformed));
+                break;
+            default:
+                outputBytes = transformed;
+                break;
+        }
+
+        await using var output = OpenOutput(options, standardOutput);
+        await output.Stream.WriteAsync(outputBytes.AsMemory(), cancellationToken);
+        if (output.IsBorrowed)
+        {
+            await output.Stream.WriteAsync("\n"u8.ToArray().AsMemory(), cancellationToken);
+        }
+
+        await output.Stream.FlushAsync(cancellationToken);
+    }
+
+    private static async Task<byte[]> ReadAllBytesAsync(Stream input, CancellationToken cancellationToken)
+    {
+        using var buffer = new MemoryStream();
+        await input.CopyToAsync(buffer, StreamBufferSize, cancellationToken);
+        return buffer.ToArray();
+    }
+
+    private static async Task WriteUtf8Async(
+        Stream output,
+        string value,
+        bool appendNewline,
+        CancellationToken cancellationToken)
+    {
+        var bytes = StrictUtf8.GetBytes(appendNewline ? value + Environment.NewLine : value);
+        await output.WriteAsync(bytes.AsMemory(), cancellationToken);
+        await output.FlushAsync(cancellationToken);
     }
 
     private static string CommandHelp(string command)
@@ -254,13 +476,16 @@ public static class CliApplication
             Usage: anybase {command} [VALUE] [options]
 
             Options:
-              -b, --base <2..64>       Use the built-in ordered alphabet (default: 16).
-              -a, --alphabet <value>   Use a preset name or custom ordered alphabet.
-              -s, --separator <text>   Separate every encoded identity symbol.
-              -i, --input <file|->     Read the value from a UTF-8 file or stdin.
-              -o, --output <file|->    Write the result to a UTF-8 file or stdout.
-              -h, --help               Show command help.
+              -b, --base <2..64>          Use the built-in ordered alphabet (default: 16).
+              -a, --alphabet <value>      Use a preset name or custom ordered alphabet.
+              -s, --separator <text>      Separate every encoded identity symbol.
+              -i, --input <file|->        Read from a file or stdin.
+              -o, --output <file|->       Write to a file or stdout.
+                  --input-format <format> text, binary, or hex (default: text).
+                  --output-format <format> text, binary, or hex (default: text).
+              -h, --help                  Show command help.
 
+            Binary output is written byte-for-byte without a trailing newline.
             Presets: binary, octal, decimal, hex, base32, base64, base64url.
             """;
     }
@@ -274,16 +499,24 @@ public static class CliApplication
           anybase --version
 
         Examples:
-          anybase encode "Hello" --base 16
-          anybase decode 48656C6C6F --base 16
-          anybase encode "Hello" --alphabet binary
-          anybase encode "Hello" --alphabet base64url
-          anybase encode "Hello" --alphabet hex --separator "-"
+          anybase encode "Hello" --alphabet hex
+          anybase decode 48656C6C6F --alphabet hex
+          anybase encode --input photo.bin --input-format binary --output encoded.txt
+          anybase decode --input encoded.txt --output photo.bin --output-format binary
+          anybase encode "41 42" --input-format hex --output-format binary
 
+        Formats: text, binary, hex.
         Alphabet presets: binary, octal, decimal, hex, base32, base64, base64url.
 
         Run 'anybase <command> --help' for command options.
         """;
+
+    private enum DataFormat
+    {
+        Text,
+        Binary,
+        Hex
+    }
 
     private sealed record CliOptions(
         string Command,
@@ -293,7 +526,36 @@ public static class CliApplication
         string? InputPath,
         string? OutputPath,
         string? Separator,
+        DataFormat InputFormat,
+        DataFormat OutputFormat,
         bool HelpRequested);
+
+    private sealed class StreamHandle : IAsyncDisposable
+    {
+        private readonly bool _ownsStream;
+
+        private StreamHandle(Stream stream, bool ownsStream)
+        {
+            Stream = stream;
+            _ownsStream = ownsStream;
+        }
+
+        public Stream Stream { get; }
+
+        public bool IsBorrowed => !_ownsStream;
+
+        public static StreamHandle Borrowed(Stream stream) => new StreamHandle(stream, ownsStream: false);
+
+        public static StreamHandle Owned(Stream stream) => new StreamHandle(stream, ownsStream: true);
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_ownsStream)
+            {
+                await Stream.DisposeAsync();
+            }
+        }
+    }
 
     private sealed class CliException : Exception
     {

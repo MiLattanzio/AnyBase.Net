@@ -8,10 +8,10 @@
     <ToolCommandName>anybase</ToolCommandName>
     <PackageId>AnyBase.Net.Tool</PackageId>
     <Title>AnyBase.Net command-line tool</Title>
-    <Description>Encode and decode UTF-8 text from the command line with any ordered alphabet.</Description>
+    <Description>Encode and decode text or binary data from the command line with any ordered alphabet.</Description>
     <PackageTags>dotnet-tool;encoding;base-conversion;radix;cli</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Adds named alphabet presets and exact symbol separators.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds raw binary stdin, stdout and file processing plus explicit text, binary and hexadecimal input/output formats.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

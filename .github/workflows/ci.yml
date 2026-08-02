@@ -86,3 +86,46 @@ jobs:
             artifacts/packages/*
             artifacts/test-results/**/*
           if-no-files-found: error
+
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore benchmarks
+        run: dotnet restore AnyBase.Net/AnyBase.Net.Benchmarks/AnyBase.Net.Benchmarks.csproj
+
+      - name: Run benchmark baseline
+        run: >-
+          dotnet run
+          --project AnyBase.Net/AnyBase.Net.Benchmarks/AnyBase.Net.Benchmarks.csproj
+          --configuration Release
+          --no-restore
+          --
+          --filter "*"
+          --artifacts artifacts/benchmarks
+
+      - name: Publish benchmark summary
+        shell: pwsh
+        run: |
+          $reports = Get-ChildItem artifacts/benchmarks/results -Filter '*-report-github.md'
+          if ($reports.Count -eq 0) {
+            throw 'BenchmarkDotNet did not produce a GitHub Markdown report.'
+          }
+          foreach ($report in $reports) {
+            Get-Content $report.FullName -Raw | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload benchmark baseline
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: benchmark-baseline-${{ github.sha }}
+          path: artifacts/benchmarks/**/*
+          if-no-files-found: error

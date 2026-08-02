@@ -7,7 +7,7 @@
     <Description>Encode and decode text or bytes with any ordered alphabet.</Description>
     <PackageTags>encoding;base-conversion;numeral-system;radix</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Adds predefined alphabets, codec factories, TryDecode APIs, custom symbol comparers, detailed public alphabet validation, and separated text encoding.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds span and memory APIs, exact output sizing, and bounded-memory synchronous and asynchronous stream processing.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
