@@ -27,6 +27,36 @@ public class CliApplicationTest
         Assert.That(result.Output.TrimEnd(), Is.EqualTo("ZAZZZZZA"));
     }
 
+    [TestCase("hex", "41")]
+    [TestCase("HEX", "41")]
+    [TestCase("base64url", "BB")]
+    public async Task RunAsync_UsesNamedAlphabetPreset(string preset, string expected)
+    {
+        var result = await RunAsync("encode", "A", "--alphabet", preset);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Zero);
+            Assert.That(result.Output.TrimEnd(), Is.EqualTo(expected));
+            Assert.That(result.Error, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_UsesSeparatorForEncodingAndDecoding()
+    {
+        var encoded = await RunAsync("encode", "A", "--alphabet", "hex", "--separator", "-");
+        var decoded = await RunAsync("decode", "4-1", "--alphabet", "hex", "--separator", "-");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(encoded.Output.TrimEnd(), Is.EqualTo("4-1"));
+            Assert.That(decoded.Output.TrimEnd(), Is.EqualTo("A"));
+            Assert.That(encoded.Error, Is.Empty);
+            Assert.That(decoded.Error, Is.Empty);
+        });
+    }
+
     [Test]
     public async Task RunAsync_ReadsRedirectedInput()
     {
@@ -71,6 +101,8 @@ public class CliApplicationTest
     [TestCase("encode")]
     [TestCase("encode", "A", "--base", "1")]
     [TestCase("encode", "A", "--alphabet", "00")]
+    [TestCase("encode", "A", "--alphabet", "hex", "--separator", "A")]
+    [TestCase("encode", "A", "--alphabet", "hex", "--separator", "")]
     [TestCase("encode", "A", "--base", "16", "--alphabet", "01")]
     [TestCase("decode", "4Z", "--base", "16")]
     public async Task RunAsync_InvalidInput_ReturnsUsageError(params string[] args)

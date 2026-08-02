@@ -63,6 +63,8 @@ public static class CliApplication
             var encoder = new Base<char>(alphabet);
             var result = options.Command switch
             {
+                "encode" when options.Separator != null => encoder.EncodeToString(input, options.Separator),
+                "decode" when options.Separator != null => encoder.DecodeToString(input, options.Separator),
                 "encode" => encoder.EncodeToString(input),
                 "decode" => encoder.DecodeToString(input),
                 _ => throw new CliException($"Unknown command '{options.Command}'.")
@@ -105,6 +107,7 @@ public static class CliApplication
         int? numberBase = null;
         string? inputPath = null;
         string? outputPath = null;
+        string? separator = null;
         var helpRequested = false;
 
         for (var index = 1; index < args.Length; index++)
@@ -137,6 +140,10 @@ public static class CliApplication
                 case "--output":
                     outputPath = ReadOptionValue(args, ref index);
                     break;
+                case "-s":
+                case "--separator":
+                    separator = ReadOptionValue(args, ref index);
+                    break;
                 default:
                     if (args[index].StartsWith("-", StringComparison.Ordinal))
                     {
@@ -163,7 +170,15 @@ public static class CliApplication
             throw new CliException("A positional value cannot be combined with --input.");
         }
 
-        return new CliOptions(command, value, alphabet, numberBase, inputPath, outputPath, helpRequested);
+        return new CliOptions(
+            command,
+            value,
+            alphabet,
+            numberBase,
+            inputPath,
+            outputPath,
+            separator,
+            helpRequested);
     }
 
     private static string ReadOptionValue(string[] args, ref int index)
@@ -180,17 +195,11 @@ public static class CliApplication
     {
         if (options.Alphabet != null)
         {
-            if (options.Alphabet.Length < 2)
-            {
-                throw new CliException("The alphabet must contain at least two symbols.");
-            }
-
-            if (options.Alphabet.Distinct().Count() != options.Alphabet.Length)
-            {
-                throw new CliException("The alphabet must contain unique symbols.");
-            }
-
-            return options.Alphabet;
+            var alphabet = AnyBaseAlphabets.TryGet(options.Alphabet, out var preset)
+                ? preset
+                : options.Alphabet;
+            ValidateAlphabet(alphabet, options.Separator);
+            return alphabet;
         }
 
         var numberBase = options.NumberBase ?? 16;
@@ -199,7 +208,21 @@ public static class CliApplication
             throw new CliException("--base must be between 2 and 64.");
         }
 
-        return DefaultAlphabet[..numberBase];
+        var resolved = DefaultAlphabet[..numberBase];
+        ValidateAlphabet(resolved, options.Separator);
+        return resolved;
+    }
+
+    private static void ValidateAlphabet(string alphabet, string? separator)
+    {
+        var validation = separator == null
+            ? AlphabetValidator.Validate(alphabet)
+            : AlphabetValidator.ValidateWithSeparator(alphabet, separator);
+        var diagnostic = validation.Diagnostics.FirstOrDefault();
+        if (diagnostic != null)
+        {
+            throw new CliException(diagnostic.Message);
+        }
     }
 
     private static async Task<string> ResolveInputAsync(
@@ -232,10 +255,13 @@ public static class CliApplication
 
             Options:
               -b, --base <2..64>       Use the built-in ordered alphabet (default: 16).
-              -a, --alphabet <symbols> Use a custom ordered alphabet.
+              -a, --alphabet <value>   Use a preset name or custom ordered alphabet.
+              -s, --separator <text>   Separate every encoded identity symbol.
               -i, --input <file|->     Read the value from a UTF-8 file or stdin.
               -o, --output <file|->    Write the result to a UTF-8 file or stdout.
               -h, --help               Show command help.
+
+            Presets: binary, octal, decimal, hex, base32, base64, base64url.
             """;
     }
 
@@ -250,8 +276,11 @@ public static class CliApplication
         Examples:
           anybase encode "Hello" --base 16
           anybase decode 48656C6C6F --base 16
-          anybase encode "Hello" --alphabet "01"
-          echo -n "Hello" | anybase encode --base 64
+          anybase encode "Hello" --alphabet binary
+          anybase encode "Hello" --alphabet base64url
+          anybase encode "Hello" --alphabet hex --separator "-"
+
+        Alphabet presets: binary, octal, decimal, hex, base32, base64, base64url.
 
         Run 'anybase <command> --help' for command options.
         """;
@@ -263,6 +292,7 @@ public static class CliApplication
         int? NumberBase,
         string? InputPath,
         string? OutputPath,
+        string? Separator,
         bool HelpRequested);
 
     private sealed class CliException : Exception

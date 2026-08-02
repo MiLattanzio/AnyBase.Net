@@ -11,7 +11,7 @@
     <Description>Encode and decode UTF-8 text from the command line with any ordered alphabet.</Description>
     <PackageTags>dotnet-tool;encoding;base-conversion;radix;cli</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Improved validation, diagnostics, package smoke testing, and cross-platform CI coverage.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds named alphabet presets and exact symbol separators.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

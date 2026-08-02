@@ -1,5 +1,6 @@
 @page "/"
 @inject IJSRuntime JavaScript
+@inject NavigationManager Navigation
 
 <PageTitle>Playground · AnyBase.Net</PageTitle>
 
@@ -16,7 +17,7 @@
         <p class="eyebrow">WebAssembly playground</p>
         <h1>Un alfabeto qualsiasi.<br /><span>Ogni byte, al suo posto.</span></h1>
         <p class="lede">
-            Codifica e decodifica testo UTF‑8 direttamente nel browser. Nessun server,
+            Codifica e decodifica testo UTF-8 direttamente nel browser. Nessun server,
             nessun dato inviato altrove.
         </p>
     </div>
@@ -50,8 +51,41 @@
                   @bind:event="oninput"
                   @onfocus="UseCustomPreset"></textarea>
 
+        <label for="separator">Separatore <span>facoltativo</span></label>
+        <input id="separator"
+               class="separator-input"
+               type="text"
+               spellcheck="false"
+               placeholder="es. - oppure ::"
+               @bind="Separator"
+               @bind:event="oninput" />
+
+        @if (CurrentValidation.IsTextCompatible)
+        {
+            <div class="validation valid" role="status">
+                <strong>Alfabeto valido</strong>
+                <span>@ValidationSummary</span>
+            </div>
+        }
+        else
+        {
+            <div class="validation invalid" role="alert">
+                <strong>Configurazione non valida</strong>
+                <ul>
+                    @foreach (var diagnostic in CurrentValidation.Diagnostics)
+                    {
+                        <li>@diagnostic.Message</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <button type="button" class="share-action" @onclick="ShareConfiguration">
+            Condividi configurazione via URL
+        </button>
+
         <div class="stats" aria-live="polite">
-            <div><span>Base</span><strong>@Alphabet.Distinct().Count()</strong></div>
+            <div><span>Base</span><strong>@BaseSize</strong></div>
             <div><span>Digit / byte</span><strong>@DigitsPerByte</strong></div>
             <div><span>Versione</span><strong>@LibraryVersion</strong></div>
         </div>
@@ -74,7 +108,7 @@
             </div>
         </div>
 
-        <label for="input">@(Mode == TransformMode.Encode ? "Testo UTF‑8" : "Testo codificato")</label>
+        <label for="input">@(Mode == TransformMode.Encode ? "Testo UTF-8" : "Testo codificato")</label>
         <textarea id="input"
                   class="value-input"
                   rows="6"
@@ -82,7 +116,7 @@
                   @bind="Input"
                   @bind:event="oninput"></textarea>
 
-        <button class="primary-action" type="button" @onclick="Transform">
+        <button class="primary-action" type="button" @onclick="Transform" disabled="@(!CanTransform)">
             <span>@(Mode == TransformMode.Encode ? "Codifica" : "Decodifica")</span>
             <span aria-hidden="true">→</span>
         </button>
@@ -111,36 +145,45 @@
 @code {
     private static readonly IReadOnlyList<AlphabetPreset> Presets = new[]
     {
-        new AlphabetPreset("binary", "Binario", "01"),
-        new AlphabetPreset("octal", "Ottale", "01234567"),
-        new AlphabetPreset("decimal", "Decimale", "0123456789"),
-        new AlphabetPreset("hex", "Esadecimale", "0123456789ABCDEF"),
-        new AlphabetPreset("base32", "Base 32", "0123456789ABCDEFGHIJKLMNOPQRSTUV"),
-        new AlphabetPreset("base64", "Base 64", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/")
+        new AlphabetPreset("binary", "Binario", AnyBaseAlphabets.Binary),
+        new AlphabetPreset("octal", "Ottale", AnyBaseAlphabets.Octal),
+        new AlphabetPreset("decimal", "Decimale", AnyBaseAlphabets.Decimal),
+        new AlphabetPreset("hex", "Esadecimale", AnyBaseAlphabets.Hexadecimal),
+        new AlphabetPreset("base32", "Base32", AnyBaseAlphabets.Base32),
+        new AlphabetPreset("base64", "Base64", AnyBaseAlphabets.Base64),
+        new AlphabetPreset("base64url", "Base64 URL-safe", AnyBaseAlphabets.Base64Url)
     };
 
     private string SelectedPreset { get; set; } = "hex";
     private static string LibraryVersion { get; } =
         typeof(Base<>).Assembly.GetName().Version?.ToString(3) ?? "dev";
-    private string Alphabet { get; set; } = "0123456789ABCDEF";
+    private string Alphabet { get; set; } = AnyBaseAlphabets.Hexadecimal;
+    private string Separator { get; set; } = string.Empty;
     private string Input { get; set; } = "Ciao, mondo 🌍";
     private string Output { get; set; } = string.Empty;
     private string Message { get; set; } = "Pronto: scegli una modalità e trasforma il testo.";
     private bool HasError { get; set; }
     private TransformMode Mode { get; set; } = TransformMode.Encode;
 
-    private string DigitsPerByte
-    {
-        get
-        {
-            var uniqueCount = Alphabet.Distinct().Count();
-            if (uniqueCount < 2 || uniqueCount != Alphabet.Length)
-            {
-                return "—";
-            }
+    private AlphabetValidationResult CurrentValidation => string.IsNullOrEmpty(Separator)
+        ? AlphabetValidator.Validate(Alphabet)
+        : AlphabetValidator.ValidateWithSeparator(Alphabet, Separator);
 
-            return new Base<char>(Alphabet).Size.ToString();
-        }
+    private bool CanTransform => CurrentValidation.IsTextCompatible;
+
+    private int BaseSize => Alphabet.Distinct().Count();
+
+    private string DigitsPerByte => CurrentValidation.IsValid
+        ? new Base<char>(Alphabet).Size.ToString()
+        : "—";
+
+    private string ValidationSummary => string.IsNullOrEmpty(Separator)
+        ? "I simboli possono essere concatenati senza ambiguità."
+        : $"I simboli saranno separati da “{Separator}”.";
+
+    protected override void OnInitialized()
+    {
+        ApplyConfigurationFromUrl();
     }
 
     private void PresetChanged()
@@ -150,6 +193,8 @@
         {
             Alphabet = preset.Alphabet;
         }
+
+        ClearResult();
     }
 
     private void UseCustomPreset()
@@ -162,8 +207,8 @@
         Mode = mode;
         Output = string.Empty;
         Message = mode == TransformMode.Encode
-            ? "Inserisci testo UTF‑8 da codificare."
-            : "Incolla una sequenza prodotta con lo stesso alfabeto.";
+            ? "Inserisci testo UTF-8 da codificare."
+            : "Incolla una sequenza prodotta con lo stesso alfabeto e separatore.";
         HasError = false;
     }
 
@@ -171,16 +216,26 @@
     {
         try
         {
-            var converter = new Base<char>(Alphabet);
-            Output = Mode == TransformMode.Encode
-                ? converter.EncodeToString(Input)
-                : converter.DecodeToString(Input);
+            var converter = AnyBase.Create(Alphabet);
+            Output = Mode switch
+            {
+                TransformMode.Encode when !string.IsNullOrEmpty(Separator) =>
+                    converter.EncodeToString(Input, Separator),
+                TransformMode.Decode when !string.IsNullOrEmpty(Separator) =>
+                    converter.DecodeToString(Input, Separator),
+                TransformMode.Encode => converter.EncodeToString(Input),
+                _ => converter.DecodeToString(Input)
+            };
             Message = Mode == TransformMode.Encode
-                ? $"{System.Text.Encoding.UTF8.GetByteCount(Input)} byte → {Output.Length} simboli"
-                : $"{Input.Length} simboli → {System.Text.Encoding.UTF8.GetByteCount(Output)} byte";
+                ? $"{System.Text.Encoding.UTF8.GetByteCount(Input)} byte → {Output.Length} caratteri"
+                : $"{Input.Length} caratteri → {System.Text.Encoding.UTF8.GetByteCount(Output)} byte";
             HasError = false;
         }
-        catch (Exception exception) when (exception is ArgumentException or FormatException or DecoderFallbackException)
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            FormatException or
+            InvalidOperationException or
+            DecoderFallbackException)
         {
             Output = string.Empty;
             Message = exception.Message;
@@ -207,10 +262,39 @@
             return;
         }
 
+        await CopyToClipboard(Output, "Risultato copiato negli appunti.");
+    }
+
+    private async Task ShareConfiguration()
+    {
+        var parameters = new List<string>();
+        if (SelectedPreset == "custom")
+        {
+            parameters.Add($"alphabet={Uri.EscapeDataString(Alphabet)}");
+        }
+        else
+        {
+            parameters.Add($"preset={Uri.EscapeDataString(SelectedPreset)}");
+        }
+
+        if (!string.IsNullOrEmpty(Separator))
+        {
+            parameters.Add($"separator={Uri.EscapeDataString(Separator)}");
+        }
+
+        parameters.Add($"mode={Mode.ToString().ToLowerInvariant()}");
+        var uri = new Uri(Navigation.Uri);
+        var shareUrl = uri.GetLeftPart(UriPartial.Path) + "?" + string.Join("&", parameters);
+        Navigation.NavigateTo(shareUrl, replace: true);
+        await CopyToClipboard(shareUrl, "URL della configurazione copiato negli appunti.");
+    }
+
+    private async Task CopyToClipboard(string value, string successMessage)
+    {
         try
         {
-            await JavaScript.InvokeVoidAsync("navigator.clipboard.writeText", Output);
-            Message = "Risultato copiato negli appunti.";
+            await JavaScript.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Message = successMessage;
             HasError = false;
         }
         catch (JSException)
@@ -218,6 +302,59 @@
             Message = "Il browser non ha consentito l’accesso agli appunti.";
             HasError = true;
         }
+    }
+
+    private void ApplyConfigurationFromUrl()
+    {
+        var query = ParseQuery(new Uri(Navigation.Uri).Query);
+        if (query.TryGetValue("preset", out var presetName))
+        {
+            var preset = Presets.FirstOrDefault(candidate =>
+                string.Equals(candidate.Key, presetName, StringComparison.OrdinalIgnoreCase));
+            if (preset != null)
+            {
+                SelectedPreset = preset.Key;
+                Alphabet = preset.Alphabet;
+            }
+        }
+        else if (query.TryGetValue("alphabet", out var customAlphabet))
+        {
+            SelectedPreset = "custom";
+            Alphabet = customAlphabet;
+        }
+
+        if (query.TryGetValue("separator", out var separator))
+        {
+            Separator = separator;
+        }
+
+        if (query.TryGetValue("mode", out var mode) &&
+            Enum.TryParse<TransformMode>(mode, ignoreCase: true, out var parsedMode))
+        {
+            Mode = parsedMode;
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseQuery(string query)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = pair.IndexOf('=');
+            var rawKey = separatorIndex < 0 ? pair : pair[..separatorIndex];
+            var rawValue = separatorIndex < 0 ? string.Empty : pair[(separatorIndex + 1)..];
+            values[Uri.UnescapeDataString(rawKey.Replace('+', ' '))] =
+                Uri.UnescapeDataString(rawValue.Replace('+', ' '));
+        }
+
+        return values;
+    }
+
+    private void ClearResult()
+    {
+        Output = string.Empty;
+        Message = "Configurazione aggiornata.";
+        HasError = false;
     }
 
     private sealed record AlphabetPreset(string Key, string Name, string Alphabet);

@@ -120,7 +120,7 @@ public class BaseTest
             Assert.That(() => Hex.Encode((string)null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.EncodeToString((byte[])null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.EncodeToString((string)null!), Throws.TypeOf<ArgumentNullException>());
-            Assert.That(() => Hex.DecodeToBytes(null!), Throws.TypeOf<ArgumentNullException>());
+            Assert.That(() => Hex.DecodeToBytes((char[])null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.DecodeToString((char[])null!), Throws.TypeOf<ArgumentNullException>());
             Assert.That(() => Hex.DecodeToString((string)null!), Throws.TypeOf<ArgumentNullException>());
         });

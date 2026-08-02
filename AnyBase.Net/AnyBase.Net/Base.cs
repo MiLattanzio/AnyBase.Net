@@ -23,6 +23,11 @@ namespace AnyBase.Net
         public IReadOnlyList<TBase> Identity { get; }
 
         /// <summary>
+        /// Gets the comparer used to validate and look up symbols.
+        /// </summary>
+        public IEqualityComparer<TBase> Comparer { get; }
+
+        /// <summary>
         /// Gets or sets the fixed number of symbols used to encode each byte.
         /// </summary>
         /// <remarks>
@@ -67,7 +72,9 @@ namespace AnyBase.Net
         /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
         /// </exception>
         public Base(HashSet<TBase> identity)
-            : this((IEnumerable<TBase>)identity)
+            : this(
+                (IEnumerable<TBase>)identity,
+                identity?.Comparer ?? EqualityComparer<TBase>.Default)
         {
         }
 
@@ -80,32 +87,50 @@ namespace AnyBase.Net
         /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
         /// </exception>
         public Base(IEnumerable<TBase> identity)
+            : this(identity, EqualityComparer<TBase>.Default)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a base from ordered symbols using a custom comparer.
+        /// </summary>
+        /// <param name="identity">The ordered alphabet. At least two unique symbols are required.</param>
+        /// <param name="comparer">The comparer used for symbol uniqueness and lookup.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="identity"/> or <paramref name="comparer"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
+        /// </exception>
+        public Base(IEnumerable<TBase> identity, IEqualityComparer<TBase> comparer)
         {
             if (identity == null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
+            if (comparer == null)
+            {
+                throw new ArgumentNullException(nameof(comparer));
+            }
+
             var values = identity.ToList();
-            if (values.Count < 2)
+            var validation = AlphabetValidator.ValidateMaterialized(
+                values,
+                comparer,
+                separator: null,
+                useSeparator: false);
+            var structuralError = validation.Diagnostics.FirstOrDefault(diagnostic => !diagnostic.TextOperationsOnly);
+            if (structuralError != null)
             {
-                throw new ArgumentException("Identity must contain at least two symbols.", nameof(identity));
-            }
-
-            if (values.Any(value => value is null))
-            {
-                throw new ArgumentException("Identity cannot contain null symbols.", nameof(identity));
-            }
-
-            if (values.Distinct().Count() != values.Count)
-            {
-                throw new ArgumentException("Identity symbols must be unique.", nameof(identity));
+                throw new ArgumentException(structuralError.Message, nameof(identity));
             }
 
             Identity = Array.AsReadOnly(values.ToArray());
+            Comparer = comparer;
             _indices = values
                 .Select((symbol, index) => new KeyValuePair<TBase, int>(symbol, index))
-                .ToDictionary(pair => pair.Key, pair => pair.Value);
+                .ToDictionary(pair => pair.Key, pair => pair.Value, comparer);
             NumeralSystem = Numeral.System.OfBase(Identity.Count);
             _size = NumeralSystem.Length;
         }
@@ -159,8 +184,69 @@ namespace AnyBase.Net
             return string.Concat(Encode(value).Select(symbol => tokens[_indices[symbol]].Text));
         }
 
+        /// <summary>
+        /// Encodes bytes and joins their identity symbols with an exact separator.
+        /// </summary>
+        /// <param name="bytes">The bytes to encode.</param>
+        /// <param name="separator">The non-empty separator placed between symbols.</param>
+        /// <returns>The separated encoded symbols.</returns>
+        public string EncodeToString(byte[] bytes, string separator)
+        {
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
+            var tokens = GetTextTokensForSeparatedStringOperations(separator);
+            return string.Join(separator, Encode(bytes).Select(symbol => tokens[_indices[symbol]].Text));
+        }
+
+        /// <summary>
+        /// Encodes UTF-8 text and joins its identity symbols with an exact separator.
+        /// </summary>
+        /// <param name="value">The text to encode.</param>
+        /// <param name="separator">The non-empty separator placed between symbols.</param>
+        /// <returns>The separated encoded symbols.</returns>
+        public string EncodeToString(string value, string separator)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            var tokens = GetTextTokensForSeparatedStringOperations(separator);
+            return string.Join(separator, Encode(value).Select(symbol => tokens[_indices[symbol]].Text));
+        }
+
         /// <inheritdoc />
         public string DecodeToString(string encoded)
+        {
+            return DecodeUtf8(DecodeToBytes(encoded));
+        }
+
+        /// <summary>
+        /// Parses separated identity symbols and decodes the resulting UTF-8 bytes.
+        /// </summary>
+        /// <param name="encoded">The separated encoded symbols.</param>
+        /// <param name="separator">The exact non-empty separator between symbols.</param>
+        /// <returns>The decoded text.</returns>
+        public string DecodeToString(string encoded, string separator)
+        {
+            return DecodeUtf8(DecodeToBytes(encoded, separator));
+        }
+
+        /// <inheritdoc />
+        public string DecodeToString(TBase[] encoded)
+        {
+            return DecodeUtf8(DecodeToBytes(encoded));
+        }
+
+        /// <summary>
+        /// Parses concatenated identity symbols and decodes them into bytes.
+        /// </summary>
+        /// <param name="encoded">The concatenated encoded symbols.</param>
+        /// <returns>The decoded bytes.</returns>
+        public byte[] DecodeToBytes(string encoded)
         {
             if (encoded == null)
             {
@@ -168,10 +254,9 @@ namespace AnyBase.Net
             }
 
             var tokens = GetTextTokensForStringOperations();
-
             if (encoded.Length == 0)
             {
-                return string.Empty;
+                return Array.Empty<byte>();
             }
 
             var orderedTokens = tokens
@@ -189,7 +274,7 @@ namespace AnyBase.Net
                 if (token == null)
                 {
                     var previewLength = Math.Min(16, encoded.Length - position);
-                    var preview = EscapeForMessage(encoded.Substring(position, previewLength));
+                    var preview = AlphabetValidator.EscapeForMessage(encoded.Substring(position, previewLength));
                     throw new FormatException(
                         $"Encoded text has no identity symbol matching at text position {position}. " +
                         $"Remaining input starts with '{preview}'.");
@@ -199,24 +284,75 @@ namespace AnyBase.Net
                 position += token.Text.Length;
             }
 
-            return DecodeToString(symbols.ToArray());
+            return DecodeToBytes(symbols.ToArray());
         }
 
-        /// <inheritdoc />
-        public string DecodeToString(TBase[] encoded)
+        /// <summary>
+        /// Parses separated identity symbols and decodes them into bytes.
+        /// </summary>
+        /// <param name="encoded">The separated encoded symbols.</param>
+        /// <param name="separator">The exact non-empty separator between symbols.</param>
+        /// <returns>The decoded bytes.</returns>
+        public byte[] DecodeToBytes(string encoded, string separator)
         {
-            var bytes = DecodeToBytes(encoded);
-            try
+            if (encoded == null)
             {
-                return StrictUtf8.GetString(bytes);
+                throw new ArgumentNullException(nameof(encoded));
             }
-            catch (DecoderFallbackException exception)
+
+            var tokens = GetTextTokensForSeparatedStringOperations(separator);
+            if (encoded.Length == 0)
             {
-                throw new DecoderFallbackException(
-                    $"Decoded bytes are not valid UTF-8 at byte index {exception.Index}.",
-                    exception.BytesUnknown ?? Array.Empty<byte>(),
-                    exception.Index);
+                return Array.Empty<byte>();
             }
+
+            var symbols = new List<TBase>();
+            for (var textPosition = 0; textPosition < encoded.Length;)
+            {
+                var matchingTokens = tokens
+                    .Where(token =>
+                        TextMatchesAt(encoded, token.Text, textPosition) &&
+                        (textPosition + token.Text.Length == encoded.Length ||
+                         TextMatchesAt(encoded, separator, textPosition + token.Text.Length)))
+                    .ToArray();
+
+                if (matchingTokens.Length == 0)
+                {
+                    var previewLength = Math.Min(16, encoded.Length - textPosition);
+                    var preview = AlphabetValidator.EscapeForMessage(
+                        encoded.Substring(textPosition, previewLength));
+                    throw new FormatException(
+                        $"Encoded text has no complete identity symbol followed by separator " +
+                        $"'{AlphabetValidator.EscapeForMessage(separator)}' at symbol index {symbols.Count} " +
+                        $"(text position {textPosition}). Remaining input starts with '{preview}'.");
+                }
+
+                if (matchingTokens.Length > 1)
+                {
+                    throw new FormatException(
+                        $"Encoded text is ambiguous at symbol index {symbols.Count} (text position {textPosition}); " +
+                        $"multiple identity symbols are followed by separator " +
+                        $"'{AlphabetValidator.EscapeForMessage(separator)}'.");
+                }
+
+                var token = matchingTokens[0];
+                symbols.Add(Identity[token.Index]);
+                textPosition += token.Text.Length;
+                if (textPosition == encoded.Length)
+                {
+                    break;
+                }
+
+                textPosition += separator.Length;
+                if (textPosition == encoded.Length)
+                {
+                    throw new FormatException(
+                        $"Encoded text ends with separator '{AlphabetValidator.EscapeForMessage(separator)}' " +
+                        $"at text position {textPosition - separator.Length}.");
+                }
+            }
+
+            return DecodeToBytes(symbols.ToArray());
         }
 
         /// <inheritdoc />
@@ -292,67 +428,84 @@ namespace AnyBase.Net
             return new Numeral(numeral.Base, integral, numeral.FractionalIndices, numeral.Positive);
         }
 
-        private static string SymbolText(TBase symbol)
+        private string DecodeUtf8(byte[] bytes)
         {
-            return symbol is null ? string.Empty : symbol.ToString() ?? string.Empty;
+            try
+            {
+                return StrictUtf8.GetString(bytes);
+            }
+            catch (DecoderFallbackException exception)
+            {
+                throw new DecoderFallbackException(
+                    $"Decoded bytes are not valid UTF-8 at byte index {exception.Index}.",
+                    exception.BytesUnknown ?? Array.Empty<byte>(),
+                    exception.Index);
+            }
         }
 
         private SymbolToken[] GetTextTokensForStringOperations()
         {
-            var tokens = Identity
-                .Select((symbol, index) => new SymbolToken(SymbolText(symbol), index))
+            var validation = AlphabetValidator.ValidateMaterialized(
+                Identity,
+                Comparer,
+                separator: null,
+                useSeparator: false);
+            ThrowIfTextIncompatible(validation, nameof(Identity));
+            return CreateTextTokens();
+        }
+
+        private SymbolToken[] GetTextTokensForSeparatedStringOperations(string separator)
+        {
+            if (separator == null)
+            {
+                throw new ArgumentNullException(nameof(separator));
+            }
+
+            var validation = AlphabetValidator.ValidateMaterialized(
+                Identity,
+                Comparer,
+                separator,
+                useSeparator: true);
+            ThrowIfTextIncompatible(validation, nameof(separator));
+            return CreateTextTokens();
+        }
+
+        private SymbolToken[] CreateTextTokens()
+        {
+            return Identity
+                .Select((symbol, index) => new SymbolToken(AlphabetValidator.SymbolText(symbol), index))
                 .ToArray();
+        }
 
-            var empty = tokens.FirstOrDefault(token => token.Text.Length == 0);
-            if (empty != null)
+        private static void ThrowIfTextIncompatible(AlphabetValidationResult validation, string parameterName)
+        {
+            var diagnostic = validation.Diagnostics.FirstOrDefault();
+            if (diagnostic == null)
             {
-                throw new InvalidOperationException(
-                    $"Identity symbol at index {empty.Index} has an empty text representation. " +
-                    "String encoding and decoding require non-empty symbol text; use the symbol-array APIs instead.");
+                return;
             }
 
-            for (var firstIndex = 0; firstIndex < tokens.Length; firstIndex++)
+            if (diagnostic.Kind == AlphabetValidationDiagnosticKind.EmptySeparator ||
+                diagnostic.Kind == AlphabetValidationDiagnosticKind.SeparatorCollision)
             {
-                for (var secondIndex = firstIndex + 1; secondIndex < tokens.Length; secondIndex++)
-                {
-                    var first = tokens[firstIndex];
-                    var second = tokens[secondIndex];
-                    if (string.Equals(first.Text, second.Text, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException(
-                            $"Identity symbols at indices {first.Index} and {second.Index} both use the text " +
-                            $"'{EscapeForMessage(first.Text)}'. String encoding and decoding require unique symbol text; " +
-                            "use the symbol-array APIs instead.");
-                    }
-
-                    var shorter = first.Text.Length < second.Text.Length ? first : second;
-                    var longer = ReferenceEquals(shorter, first) ? second : first;
-                    if (longer.Text.StartsWith(shorter.Text, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException(
-                            $"Identity symbol text '{EscapeForMessage(shorter.Text)}' at index {shorter.Index} is a prefix " +
-                            $"of '{EscapeForMessage(longer.Text)}' at index {longer.Index}. String encoding and decoding " +
-                            "require a prefix-free textual alphabet; use the symbol-array APIs instead.");
-                    }
-                }
+                throw new ArgumentException(diagnostic.Message, parameterName);
             }
 
-            return tokens;
+            throw new InvalidOperationException(diagnostic.Message);
         }
 
         private static string DescribeSymbol(TBase symbol)
         {
-            return symbol is null ? "<null>" : $"'{EscapeForMessage(SymbolText(symbol))}'";
+            return symbol is null
+                ? "<null>"
+                : $"'{AlphabetValidator.EscapeForMessage(AlphabetValidator.SymbolText(symbol))}'";
         }
 
-        private static string EscapeForMessage(string value)
+        private static bool TextMatchesAt(string value, string candidate, int position)
         {
-            return value
-                .Replace("\\", "\\\\")
-                .Replace("\r", "\\r")
-                .Replace("\n", "\\n")
-                .Replace("\t", "\\t")
-                .Replace("\0", "\\0");
+            return position >= 0 &&
+                   candidate.Length <= value.Length - position &&
+                   string.CompareOrdinal(value, position, candidate, 0, candidate.Length) == 0;
         }
 
         private sealed class SymbolToken

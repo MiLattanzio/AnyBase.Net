@@ -7,12 +7,12 @@
     <Description>Encode and decode text or bytes with any ordered alphabet.</Description>
     <PackageTags>encoding;base-conversion;numeral-system;radix</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Rejects ambiguous textual alphabets in string APIs, improves decoding diagnostics, and expands automated package and property testing.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds predefined alphabets, codec factories, TryDecode APIs, custom symbol comparers, detailed public alphabet validation, and separated text encoding.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>1.1.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.1.1</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <ItemGroup>

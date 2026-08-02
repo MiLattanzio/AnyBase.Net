@@ -4,6 +4,29 @@ Le modifiche rilevanti di AnyBase.Net sono documentate in questo file.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/)
 e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 
+## [1.2.0] - Unreleased
+
+### Added
+
+- Catalogo pubblico di alfabeti binario, ottale, decimale, esadecimale,
+  Base32, Base64 e Base64 URL-safe.
+- Factory `AnyBase.Create(...)`, `CreateHex()` e factory dedicate a ogni preset.
+- API `TryDecodeToBytes` e `TryDecodeToString` additive, senza modificare il
+  contratto esistente di `IBase<T>`.
+- Separatore esplicito per codificare e decodificare alfabeti testuali con
+  simboli multicarattere, inclusi quelli non prefix-free.
+- Comparatore personalizzabile per validazione e lookup dei simboli.
+- `AlphabetValidator` pubblico con diagnostica strutturata, indici dei simboli
+  coinvolti e distinzione tra validità strutturale e compatibilità testuale.
+- Preset CLI identificabili per nome e opzione `--separator`.
+- Validazione in tempo reale e URL condivisibili nel playground WebAssembly.
+
+### Changed
+
+- I preset Base32, Base64 e Base64 URL-safe usano l'ordine dei simboli definito
+  da RFC 4648; il formato resta la codifica a larghezza fissa di AnyBase.Net.
+- La validazione del pacchetto confronta l'API pubblica con la versione 1.1.1.
+
 ## [1.1.1] - 2026-08-02
 
 ### Added
@@ -39,5 +62,6 @@ e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 - Aggiornamento a NumeralSystems.Net 5.3.0.
 - Round-trip UTF-8, alfabeti ordinati deterministici e validazione più rigorosa.
 
+[1.2.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.1...HEAD
 [1.1.1]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/MiLattanzio/AnyBase.Net/releases/tag/v1.1.0

@@ -70,9 +70,10 @@ try {
 
     $program = @'
 using AnyBase.Net;
+using AnyBaseFactory = global::AnyBase.Net.AnyBase;
 
-var hexadecimal = new Base<char>("0123456789ABCDEF");
-Console.Write(hexadecimal.EncodeToString("A"));
+var hexadecimal = AnyBaseFactory.CreateHex();
+Console.Write(hexadecimal.EncodeToString("A", "-"));
 '@
     [IO.File]::WriteAllText(
         (Join-Path $consumerDirectory 'Program.cs'),
@@ -99,8 +100,8 @@ Console.Write(hexadecimal.EncodeToString("A"));
 
     $consumerAssembly = Join-Path $consumerDirectory 'bin/Release/net8.0/PackageConsumer.dll'
     $consumerOutput = (& dotnet $consumerAssembly | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $consumerOutput -ne '41') {
-        throw "The library package smoke test returned '$consumerOutput' instead of '41'."
+    if ($LASTEXITCODE -ne 0 -or $consumerOutput -ne '4-1') {
+        throw "The library package smoke test returned '$consumerOutput' instead of '4-1'."
     }
 
     Invoke-DotNet -Arguments @(
@@ -115,9 +116,9 @@ Console.Write(hexadecimal.EncodeToString("A"));
         [Runtime.InteropServices.OSPlatform]::Windows)
     $toolName = if ($runningOnWindows) { 'anybase.exe' } else { 'anybase' }
     $toolPath = Join-Path $toolDirectory $toolName
-    $toolOutput = (& $toolPath encode A --base 16 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $toolOutput -ne '41') {
-        throw "The CLI package smoke test returned '$toolOutput' instead of '41'."
+    $toolOutput = (& $toolPath encode A --alphabet hex --separator '-' | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $toolOutput -ne '4-1') {
+        throw "The CLI package smoke test returned '$toolOutput' instead of '4-1'."
     }
 
     Write-Output "Package smoke tests passed for AnyBase.Net $Version and AnyBase.Net.Tool $Version."
