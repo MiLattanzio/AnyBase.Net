@@ -4,7 +4,7 @@ Le modifiche rilevanti di AnyBase.Net sono documentate in questo file.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/)
 e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 
-## [1.2.0] - Unreleased
+## [1.2.0] - 2026-08-02
 
 ### Added
 
