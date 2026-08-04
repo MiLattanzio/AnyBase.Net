@@ -4,7 +4,9 @@ param(
     [string] $PackageDirectory,
 
     [Parameter(Mandatory = $true)]
-    [string] $Version
+    [string] $Version,
+
+    [string] $DotNetPath = 'dotnet'
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +18,7 @@ function Invoke-DotNet {
         [string[]] $Arguments
     )
 
-    & dotnet @Arguments
+    & $DotNetPath @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet $($Arguments -join ' ') failed with exit code $LASTEXITCODE."
     }
@@ -73,6 +75,7 @@ using AnyBase.Net;
 using AnyBaseFactory = global::AnyBase.Net.AnyBase;
 
 var hexadecimal = AnyBaseFactory.CreateHex();
+var rfcBase64 = AnyBaseFactory.CreateRfc4648Base64();
 var source = new byte[] { 0x00, 0x0A, 0xFF };
 var encoded = new char[hexadecimal.GetEncodedLength(source.Length)];
 var symbolsWritten = hexadecimal.Encode(source, encoded);
@@ -89,7 +92,9 @@ await hexadecimal.DecodeAsync(streamEncoded, streamDecoded, bufferSize: 1);
 Console.Write(
     $"{new string(encoded)}|{Convert.ToHexString(decoded)}|" +
     $"{System.Text.Encoding.ASCII.GetString(streamEncoded.ToArray())}|" +
-    Convert.ToHexString(streamDecoded.ToArray()));
+    $"{Convert.ToHexString(streamDecoded.ToArray())}|" +
+    $"{rfcBase64.EncodeToString("f")}|" +
+    Convert.ToHexString(rfcBase64.DecodeToBytes("Zg==")));
 '@
     [IO.File]::WriteAllText(
         (Join-Path $consumerDirectory 'Program.cs'),
@@ -115,8 +120,8 @@ Console.Write(
     )
 
     $consumerAssembly = Join-Path $consumerDirectory 'bin/Release/net8.0/PackageConsumer.dll'
-    $consumerOutput = (& dotnet $consumerAssembly | Out-String).Trim()
-    $expectedConsumerOutput = '000AFF|000AFF|000AFF|000AFF'
+    $consumerOutput = (& $DotNetPath $consumerAssembly | Out-String).Trim()
+    $expectedConsumerOutput = '000AFF|000AFF|000AFF|000AFF|Zg==|66'
     if ($LASTEXITCODE -ne 0 -or $consumerOutput -ne $expectedConsumerOutput) {
         throw "The library package smoke test returned '$consumerOutput' instead of '$expectedConsumerOutput'."
     }
@@ -136,6 +141,14 @@ Console.Write(
     $toolOutput = (& $toolPath encode A --alphabet hex --separator '-' | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $toolOutput -ne '4-1') {
         throw "The CLI package smoke test returned '$toolOutput' instead of '4-1'."
+    }
+
+    $packedToolOutput = (& $toolPath encode f `
+        --mode packed `
+        --alphabet rfc-base64 `
+        --padding omit | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $packedToolOutput -ne 'Zg') {
+        throw "The packed CLI smoke test returned '$packedToolOutput' instead of 'Zg'."
     }
 
     $binaryInputPath = Join-Path $testRoot 'input.bin'

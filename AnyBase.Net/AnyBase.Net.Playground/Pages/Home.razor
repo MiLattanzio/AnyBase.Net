@@ -35,12 +35,41 @@
 
         <label for="preset">Preset</label>
         <select id="preset" @bind="SelectedPreset" @bind:after="PresetChanged">
-            @foreach (var preset in Presets)
-            {
-                <option value="@preset.Key">@preset.Name</option>
-            }
+            <optgroup label="Compatibilita fixed-width">
+                @foreach (var preset in Presets.Where(candidate => !candidate.IsRfc))
+                {
+                    <option value="@preset.Key">@preset.Name</option>
+                }
+            </optgroup>
+            <optgroup label="RFC 4648 packed">
+                @foreach (var preset in Presets.Where(candidate => candidate.IsRfc))
+                {
+                    <option value="@preset.Key">@preset.Name</option>
+                }
+            </optgroup>
             <option value="custom">Personalizzato</option>
         </select>
+
+        <div class="encoding-options">
+            <div>
+                <label for="encoding-mode">Modalità di encoding</label>
+                <select id="encoding-mode" @bind="SelectedEncodingMode" @bind:after="EncodingModeChanged">
+                    <option value="@EncodingMode.FixedWidthByte">Fixed-width byte</option>
+                    <option value="@EncodingMode.Packed">Packed</option>
+                </select>
+            </div>
+            <div>
+                <label for="padding">Padding</label>
+                <select id="padding"
+                        value="@PaddingSelection"
+                        @onchange="PaddingChanged"
+                        disabled="@(!CanConfigurePadding)">
+                    <option value="include">Includi (=)</option>
+                    <option value="omit">Ometti</option>
+                </select>
+            </div>
+        </div>
+        <p class="option-note">@EncodingModeSummary</p>
 
         <label for="alphabet">Simboli ordinati <span>zero → massimo</span></label>
         <textarea id="alphabet"
@@ -57,10 +86,11 @@
                type="text"
                spellcheck="false"
                placeholder="es. - oppure ::"
+               disabled="@(SelectedEncodingMode == EncodingMode.Packed)"
                @bind="Separator"
                @bind:event="oninput" />
 
-        @if (CurrentValidation.IsTextCompatible)
+        @if (CanTransform)
         {
             <div class="validation valid" role="status">
                 <strong>Alfabeto valido</strong>
@@ -72,6 +102,10 @@
             <div class="validation invalid" role="alert">
                 <strong>Configurazione non valida</strong>
                 <ul>
+                    @if (PackedConfigurationError is not null)
+                    {
+                        <li>@PackedConfigurationError</li>
+                    }
                     @foreach (var diagnostic in CurrentValidation.Diagnostics)
                     {
                         <li>@diagnostic.Message</li>
@@ -86,7 +120,8 @@
 
         <div class="stats" aria-live="polite">
             <div><span>Base</span><strong>@BaseSize</strong></div>
-            <div><span>Digit / byte</span><strong>@DigitsPerByte</strong></div>
+            <div><span>Modalità</span><strong>@ModeDisplayName</strong></div>
+            <div><span>Padding</span><strong>@PaddingDisplayName</strong></div>
             <div><span>Versione</span><strong>@LibraryVersion</strong></div>
         </div>
     </section>
@@ -99,10 +134,10 @@
                 <h2 id="converter-title">Prova la libreria</h2>
             </div>
             <div class="mode-switch" aria-label="Modalità">
-                <button class="@(Mode == TransformMode.Encode ? "active" : null)"
+                <button class="@(Operation == TransformMode.Encode ? "active" : null)"
                         type="button"
                         @onclick="() => SetMode(TransformMode.Encode)">Codifica</button>
-                <button class="@(Mode == TransformMode.Decode ? "active" : null)"
+                <button class="@(Operation == TransformMode.Decode ? "active" : null)"
                         type="button"
                         @onclick="() => SetMode(TransformMode.Decode)">Decodifica</button>
             </div>
@@ -139,7 +174,7 @@
         }
 
         <button class="primary-action" type="button" @onclick="Transform" disabled="@(!CanTransform)">
-            <span>@(Mode == TransformMode.Encode ? "Codifica" : "Decodifica")</span>
+            <span>@(Operation == TransformMode.Encode ? "Codifica" : "Decodifica")</span>
             <span aria-hidden="true">→</span>
         </button>
 
@@ -196,13 +231,17 @@
     private static readonly System.Text.Encoding DisplayUtf8 = new System.Text.UTF8Encoding(false, false);
     private static readonly IReadOnlyList<AlphabetPreset> Presets = new[]
     {
-        new AlphabetPreset("binary", "Binario", AnyBaseAlphabets.Binary),
-        new AlphabetPreset("octal", "Ottale", AnyBaseAlphabets.Octal),
-        new AlphabetPreset("decimal", "Decimale", AnyBaseAlphabets.Decimal),
-        new AlphabetPreset("hex", "Esadecimale", AnyBaseAlphabets.Hexadecimal),
-        new AlphabetPreset("base32", "Base32", AnyBaseAlphabets.Base32),
-        new AlphabetPreset("base64", "Base64", AnyBaseAlphabets.Base64),
-        new AlphabetPreset("base64url", "Base64 URL-safe", AnyBaseAlphabets.Base64Url)
+        new AlphabetPreset("binary", "Fixed · Binario", AnyBaseAlphabets.Binary),
+        new AlphabetPreset("octal", "Fixed · Ottale", AnyBaseAlphabets.Octal),
+        new AlphabetPreset("decimal", "Fixed · Decimale", AnyBaseAlphabets.Decimal),
+        new AlphabetPreset("hex", "Fixed · Esadecimale", AnyBaseAlphabets.Hexadecimal),
+        new AlphabetPreset("base32", "Fixed · Base32", AnyBaseAlphabets.Base32),
+        new AlphabetPreset("base64", "Fixed · Base64", AnyBaseAlphabets.Base64),
+        new AlphabetPreset("base64url", "Fixed · Base64 URL-safe", AnyBaseAlphabets.Base64Url),
+        new AlphabetPreset("rfc-base16", "RFC 4648 · Base16", AnyBaseAlphabets.Hexadecimal, true, false),
+        new AlphabetPreset("rfc-base32", "RFC 4648 · Base32", AnyBaseAlphabets.Base32, true, true),
+        new AlphabetPreset("rfc-base64", "RFC 4648 · Base64", AnyBaseAlphabets.Base64, true, true),
+        new AlphabetPreset("rfc-base64url", "RFC 4648 · Base64 URL-safe", AnyBaseAlphabets.Base64Url, true, true)
     };
 
     private string SelectedPreset { get; set; } = "hex";
@@ -220,23 +259,55 @@
     private bool InputIsPreview { get; set; }
     private bool InputDisplayIsDirty { get; set; }
     private int LastInputSize { get; set; }
-    private TransformMode Mode { get; set; } = TransformMode.Encode;
+    private TransformMode Operation { get; set; } = TransformMode.Encode;
+    private EncodingMode SelectedEncodingMode { get; set; } = EncodingMode.FixedWidthByte;
+    private bool UsePadding { get; set; }
     private DataView InputView { get; set; } = DataView.Text;
     private DataView OutputView { get; set; } = DataView.Text;
 
-    private AlphabetValidationResult CurrentValidation => string.IsNullOrEmpty(Separator)
+    private AlphabetValidationResult CurrentValidation =>
+        SelectedEncodingMode == EncodingMode.Packed || string.IsNullOrEmpty(Separator)
         ? AlphabetValidator.Validate(Alphabet)
         : AlphabetValidator.ValidateWithSeparator(Alphabet, Separator);
 
-    private bool CanTransform => CurrentValidation.IsTextCompatible;
+    private bool CanTransform => CurrentValidation.IsTextCompatible && PackedConfigurationError is null;
 
     private int BaseSize => Alphabet.Distinct().Count();
+
+    private string? PackedConfigurationError => SelectedEncodingMode != EncodingMode.Packed
+        ? null
+        : !IsPowerOfTwo(BaseSize) || BaseSize > 256
+            ? "La modalità packed richiede un alfabeto con 2, 4, 8, 16, 32, 64, 128 o 256 simboli."
+            : UsePadding && Alphabet.Contains('=')
+                ? "Il simbolo di padding '=' non può far parte dell'alfabeto."
+                : null;
+
+    private bool CanConfigurePadding => SelectedEncodingMode == EncodingMode.Packed &&
+        !string.Equals(SelectedPreset, "rfc-base16", StringComparison.Ordinal);
+
+    private string PaddingSelection => UsePadding ? "include" : "omit";
+
+    private string ModeDisplayName => SelectedEncodingMode == EncodingMode.Packed ? "Packed" : "Fixed";
+
+    private string PaddingDisplayName => SelectedEncodingMode == EncodingMode.Packed
+        ? UsePadding ? "Incluso" : "Omesso"
+        : "N/A";
+
+    private string EncodingModeSummary => SelectedEncodingMode == EncodingMode.Packed
+        ? $"Intera sequenza, {PackedBitsPerSymbol} bit per simbolo; gli zero iniziali sono preservati."
+        : "Un gruppo a larghezza fissa per ogni byte, compatibile con AnyBase.Net 1.x.";
+
+    private int PackedBitsPerSymbol => BaseSize > 1 && IsPowerOfTwo(BaseSize)
+        ? System.Numerics.BitOperations.Log2((uint)BaseSize)
+        : 0;
 
     private string DigitsPerByte => CurrentValidation.IsValid
         ? new Base<char>(Alphabet).Size.ToString()
         : "—";
 
-    private string ValidationSummary => string.IsNullOrEmpty(Separator)
+    private string ValidationSummary => SelectedEncodingMode == EncodingMode.Packed
+        ? $"Bitstream packed con padding {(UsePadding ? "incluso" : "omesso")}."
+        : string.IsNullOrEmpty(Separator)
         ? "I simboli possono essere concatenati senza ambiguità."
         : $"I simboli saranno separati da “{Separator}”.";
 
@@ -268,6 +339,14 @@
         if (preset != null)
         {
             Alphabet = preset.Alphabet;
+            SelectedEncodingMode = preset.IsRfc
+                ? EncodingMode.Packed
+                : EncodingMode.FixedWidthByte;
+            UsePadding = preset.UsePadding;
+            if (preset.IsRfc)
+            {
+                Separator = string.Empty;
+            }
         }
 
         ClearResult("Configurazione aggiornata.");
@@ -278,9 +357,30 @@
         SelectedPreset = "custom";
     }
 
+    private void EncodingModeChanged()
+    {
+        SelectedPreset = "custom";
+        if (SelectedEncodingMode == EncodingMode.Packed)
+        {
+            Separator = string.Empty;
+        }
+        else
+        {
+            UsePadding = false;
+        }
+
+        ClearResult("Modalità di encoding aggiornata.");
+    }
+
+    private void PaddingChanged(ChangeEventArgs args)
+    {
+        UsePadding = string.Equals(args.Value?.ToString(), "include", StringComparison.Ordinal);
+        ClearResult("Padding aggiornato.");
+    }
+
     private void SetMode(TransformMode mode)
     {
-        Mode = mode;
+        Operation = mode;
         ClearResult(mode == TransformMode.Encode
             ? "I byte di input saranno trasformati nei simboli dell’alfabeto."
             : "L’input deve contenere simboli codificati con lo stesso alfabeto e separatore.");
@@ -345,12 +445,14 @@
         try
         {
             CommitInputDisplay();
-            var converter = AnyBase.Create(Alphabet);
+            var converter = CreateCodec();
             using var input = new MemoryStream(InputBytes, writable: false);
             using var output = new MemoryStream();
-            var separator = string.IsNullOrEmpty(Separator) ? null : Separator;
+            var separator = SelectedEncodingMode == EncodingMode.Packed || string.IsNullOrEmpty(Separator)
+                ? null
+                : Separator;
 
-            if (Mode == TransformMode.Encode)
+            if (Operation == TransformMode.Encode)
             {
                 await converter.EncodeAsync(input, output, separator);
                 OutputView = DataView.Text;
@@ -380,6 +482,24 @@
         }
     }
 
+    private Base<char> CreateCodec()
+    {
+        return SelectedPreset switch
+        {
+            "rfc-base16" => AnyBase.CreateRfc4648Base16(),
+            "rfc-base32" => AnyBase.CreateRfc4648Base32(UsePadding),
+            "rfc-base64" => AnyBase.CreateRfc4648Base64(UsePadding),
+            "rfc-base64url" => AnyBase.CreateRfc4648Base64Url(UsePadding),
+            _ when SelectedEncodingMode == EncodingMode.Packed && UsePadding => new Base<char>(
+                Alphabet,
+                EqualityComparer<char>.Default,
+                EncodingMode.Packed,
+                '=',
+                true),
+            _ => AnyBase.Create(Alphabet, SelectedEncodingMode)
+        };
+    }
+
     private void Swap()
     {
         if (!HasOutput)
@@ -392,7 +512,7 @@
         InputDisplayIsDirty = false;
         LoadedFileName = null;
         RenderInput();
-        Mode = Mode == TransformMode.Encode ? TransformMode.Decode : TransformMode.Encode;
+        Operation = Operation == TransformMode.Encode ? TransformMode.Decode : TransformMode.Encode;
         ClearResult("Risultato spostato nell’input.");
     }
 
@@ -431,12 +551,14 @@
             parameters.Add($"preset={Uri.EscapeDataString(SelectedPreset)}");
         }
 
-        if (!string.IsNullOrEmpty(Separator))
+        if (SelectedEncodingMode == EncodingMode.FixedWidthByte && !string.IsNullOrEmpty(Separator))
         {
             parameters.Add($"separator={Uri.EscapeDataString(Separator)}");
         }
 
-        parameters.Add($"mode={Mode.ToString().ToLowerInvariant()}");
+        parameters.Add($"operation={Operation.ToString().ToLowerInvariant()}");
+        parameters.Add($"encodingMode={(SelectedEncodingMode == EncodingMode.Packed ? "packed" : "fixed")}");
+        parameters.Add($"padding={(UsePadding ? "include" : "omit")}");
         parameters.Add($"inputView={InputView.ToString().ToLowerInvariant()}");
         parameters.Add($"outputView={OutputView.ToString().ToLowerInvariant()}");
         var uri = new Uri(Navigation.Uri);
@@ -550,6 +672,10 @@
             {
                 SelectedPreset = preset.Key;
                 Alphabet = preset.Alphabet;
+                SelectedEncodingMode = preset.IsRfc
+                    ? EncodingMode.Packed
+                    : EncodingMode.FixedWidthByte;
+                UsePadding = preset.UsePadding;
             }
         }
         else if (query.TryGetValue("alphabet", out var customAlphabet))
@@ -558,15 +684,34 @@
             Alphabet = customAlphabet;
         }
 
-        if (query.TryGetValue("separator", out var separator))
+        if (query.TryGetValue("encodingMode", out var encodingMode))
+        {
+            SelectedEncodingMode = string.Equals(encodingMode, "packed", StringComparison.OrdinalIgnoreCase)
+                ? EncodingMode.Packed
+                : EncodingMode.FixedWidthByte;
+        }
+
+        if (query.TryGetValue("padding", out var padding))
+        {
+            UsePadding = string.Equals(padding, "include", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (query.TryGetValue("separator", out var separator) &&
+            SelectedEncodingMode == EncodingMode.FixedWidthByte)
         {
             Separator = separator;
         }
 
-        if (query.TryGetValue("mode", out var mode) &&
-            Enum.TryParse<TransformMode>(mode, ignoreCase: true, out var parsedMode))
+        var hasOperation = query.TryGetValue("operation", out var operation);
+        if (!hasOperation)
         {
-            Mode = parsedMode;
+            hasOperation = query.TryGetValue("mode", out operation);
+        }
+
+        if (hasOperation &&
+            Enum.TryParse<TransformMode>(operation, ignoreCase: true, out var parsedMode))
+        {
+            Operation = parsedMode;
         }
 
         if (query.TryGetValue("inputView", out var inputView) &&
@@ -600,7 +745,7 @@
     private string DownloadFileName()
     {
         var sourceName = string.IsNullOrWhiteSpace(LoadedFileName) ? "anybase-result" : LoadedFileName;
-        if (Mode == TransformMode.Encode)
+        if (Operation == TransformMode.Encode)
         {
             return sourceName + ".anybase";
         }
@@ -641,7 +786,14 @@
         _ => view.ToString()
     };
 
-    private sealed record AlphabetPreset(string Key, string Name, string Alphabet);
+    private static bool IsPowerOfTwo(int value) => value > 0 && (value & (value - 1)) == 0;
+
+    private sealed record AlphabetPreset(
+        string Key,
+        string Name,
+        string Alphabet,
+        bool IsRfc = false,
+        bool UsePadding = false);
 
     private enum TransformMode
     {

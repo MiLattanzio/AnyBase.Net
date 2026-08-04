@@ -41,6 +41,12 @@ namespace AnyBase.Net
         {
             ValidateStreams(codec, input, output, bufferSize);
             var tokens = GetTokens(codec, separator);
+            if (codec.Mode == EncodingMode.Packed)
+            {
+                EncodePacked(codec, input, output, tokens, bufferSize);
+                return;
+            }
+
             var inputBuffer = new byte[bufferSize];
             var symbolBuffer = new TBase[codec.GetEncodedLength(bufferSize)];
             var hasWrittenSymbol = false;
@@ -91,6 +97,13 @@ namespace AnyBase.Net
             ValidateStreams(codec, input, output, bufferSize);
             cancellationToken.ThrowIfCancellationRequested();
             var tokens = GetTokens(codec, separator);
+            if (codec.Mode == EncodingMode.Packed)
+            {
+                await EncodePackedAsync(codec, input, output, tokens, bufferSize, cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
             var inputBuffer = new byte[bufferSize];
             var symbolBuffer = new TBase[codec.GetEncodedLength(bufferSize)];
             var hasWrittenSymbol = false;
@@ -265,9 +278,174 @@ namespace AnyBase.Net
             }
         }
 
+        private static void EncodePacked<TBase>(
+            Base<TBase> codec,
+            Stream input,
+            Stream output,
+            IReadOnlyList<TextToken> tokens,
+            int bufferSize)
+            where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
+        {
+            var quantumBytes = codec.PackedInputQuantumBytes;
+            var inputBuffer = new byte[checked(bufferSize + quantumBytes - 1)];
+            var symbolBuffer = new TBase[codec.GetEncodedLength(inputBuffer.Length)];
+            var buffered = 0;
+            var hasWrittenSymbol = false;
+
+            while (true)
+            {
+                var bytesRead = input.Read(inputBuffer, buffered, bufferSize);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                var total = buffered + bytesRead;
+                var processCount = total - total % quantumBytes;
+                if (processCount > 0)
+                {
+                    WritePackedChunk(
+                        codec,
+                        inputBuffer.AsSpan(0, processCount),
+                        output,
+                        symbolBuffer,
+                        tokens,
+                        ref hasWrittenSymbol);
+                }
+
+                buffered = total - processCount;
+                if (buffered > 0)
+                {
+                    Array.Copy(inputBuffer, processCount, inputBuffer, 0, buffered);
+                }
+            }
+
+            if (buffered > 0)
+            {
+                WritePackedChunk(
+                    codec,
+                    inputBuffer.AsSpan(0, buffered),
+                    output,
+                    symbolBuffer,
+                    tokens,
+                    ref hasWrittenSymbol);
+            }
+        }
+
+        private static async Task EncodePackedAsync<TBase>(
+            Base<TBase> codec,
+            Stream input,
+            Stream output,
+            IReadOnlyList<TextToken> tokens,
+            int bufferSize,
+            CancellationToken cancellationToken)
+            where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
+        {
+            var quantumBytes = codec.PackedInputQuantumBytes;
+            var inputBuffer = new byte[checked(bufferSize + quantumBytes - 1)];
+            var symbolBuffer = new TBase[codec.GetEncodedLength(inputBuffer.Length)];
+            var buffered = 0;
+            var hasWrittenSymbol = false;
+
+            while (true)
+            {
+                var bytesRead = await input
+                    .ReadAsync(inputBuffer.AsMemory(buffered, bufferSize), cancellationToken)
+                    .ConfigureAwait(false);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                var total = buffered + bytesRead;
+                var processCount = total - total % quantumBytes;
+                if (processCount > 0)
+                {
+                    await WritePackedChunkAsync(
+                            codec,
+                            inputBuffer.AsMemory(0, processCount),
+                            output,
+                            symbolBuffer,
+                            tokens,
+                            hasWrittenSymbol,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    hasWrittenSymbol = true;
+                }
+
+                buffered = total - processCount;
+                if (buffered > 0)
+                {
+                    Array.Copy(inputBuffer, processCount, inputBuffer, 0, buffered);
+                }
+            }
+
+            if (buffered > 0)
+            {
+                await WritePackedChunkAsync(
+                        codec,
+                        inputBuffer.AsMemory(0, buffered),
+                        output,
+                        symbolBuffer,
+                        tokens,
+                        hasWrittenSymbol,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private static void WritePackedChunk<TBase>(
+            Base<TBase> codec,
+            ReadOnlySpan<byte> bytes,
+            Stream output,
+            TBase[] symbolBuffer,
+            IReadOnlyList<TextToken> tokens,
+            ref bool hasWrittenSymbol)
+            where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
+        {
+            var symbolsWritten = codec.Encode(bytes, symbolBuffer.AsSpan());
+            var text = BuildEncodedText(
+                codec,
+                symbolBuffer,
+                symbolsWritten,
+                tokens,
+                null,
+                ref hasWrittenSymbol);
+            var encodedBytes = StrictUtf8.GetBytes(text);
+            output.Write(encodedBytes, 0, encodedBytes.Length);
+        }
+
+        private static async Task WritePackedChunkAsync<TBase>(
+            Base<TBase> codec,
+            ReadOnlyMemory<byte> bytes,
+            Stream output,
+            TBase[] symbolBuffer,
+            IReadOnlyList<TextToken> tokens,
+            bool hasWrittenSymbol,
+            CancellationToken cancellationToken)
+            where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
+        {
+            var symbolsWritten = codec.EncodeMemory(bytes, symbolBuffer.AsMemory());
+            var text = BuildEncodedText(
+                codec,
+                symbolBuffer,
+                symbolsWritten,
+                tokens,
+                null,
+                ref hasWrittenSymbol);
+            var encodedBytes = StrictUtf8.GetBytes(text);
+            await output.WriteAsync(encodedBytes.AsMemory(), cancellationToken).ConfigureAwait(false);
+        }
+
         private static IReadOnlyList<TextToken> GetTokens<TBase>(Base<TBase> codec, string? separator)
             where TBase : IComparable, IComparable<TBase>, IConvertible, IEquatable<TBase>
         {
+            if (codec.Mode == EncodingMode.Packed && separator != null)
+            {
+                throw new InvalidOperationException(
+                    "Packed mode does not support symbol separators because they are not part of RFC 4648 encodings.");
+            }
+
             var validation = separator == null
                 ? AlphabetValidator.Validate(codec.Identity, codec.Comparer)
                 : AlphabetValidator.ValidateWithSeparator(codec.Identity, separator, codec.Comparer);
@@ -283,8 +461,25 @@ namespace AnyBase.Net
                 throw new InvalidOperationException(diagnostic.Message);
             }
 
-            return codec.Identity
+            var tokens = codec.Identity
                 .Select((symbol, index) => new TextToken(AlphabetValidator.SymbolText(symbol), index, separator))
+                .ToArray();
+            if (codec.Mode != EncodingMode.Packed || !codec.SupportsPadding)
+            {
+                return tokens;
+            }
+
+            var paddingText = AlphabetValidator.SymbolText(codec.PaddingSymbol);
+            if (paddingText.Length == 0 || tokens.Any(token =>
+                    token.Text.StartsWith(paddingText, StringComparison.Ordinal) ||
+                    paddingText.StartsWith(token.Text, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    "The padding symbol text must be non-empty and prefix-distinct from every alphabet symbol.");
+            }
+
+            return tokens
+                .Concat(new[] { new TextToken(paddingText, -1, separator, isPadding: true) })
                 .ToArray();
         }
 
@@ -305,8 +500,15 @@ namespace AnyBase.Net
                     builder.Append(separator);
                 }
 
-                var identityIndex = codec.GetIdentityIndex(symbols[index]);
-                builder.Append(tokens[identityIndex].Text);
+                if (codec.IsPaddingSymbol(symbols[index]))
+                {
+                    builder.Append(AlphabetValidator.SymbolText(codec.PaddingSymbol));
+                }
+                else
+                {
+                    var identityIndex = codec.GetIdentityIndex(symbols[index]);
+                    builder.Append(tokens[identityIndex].Text);
+                }
                 hasWrittenSymbol = true;
             }
 
@@ -370,6 +572,11 @@ namespace AnyBase.Net
             private int _groupValue;
             private int _symbolIndex;
             private int _textPosition;
+            private int _packedBuffer;
+            private int _packedBits;
+            private int _packedDataSymbolCount;
+            private int _packedPaddingCount;
+            private bool _packedSawPadding;
             private bool _lastTokenEndedWithSeparator;
 
             public IncrementalTextDecoder(
@@ -400,7 +607,7 @@ namespace AnyBase.Net
                     if (exact != null)
                     {
                         _pending.Clear();
-                        return AddDigit(exact.Index, out decodedByte);
+                        return AddToken(exact, out decodedByte);
                     }
 
                     if (_tokens.Any(token => token.Text.StartsWith(pending, StringComparison.Ordinal)))
@@ -417,7 +624,7 @@ namespace AnyBase.Net
                     {
                         _pending.Clear();
                         _lastTokenEndedWithSeparator = true;
-                        return AddDigit(exact.Index, out decodedByte);
+                        return AddToken(exact, out decodedByte);
                     }
 
                     if (_tokens.Any(token => token.BoundaryText.StartsWith(pending, StringComparison.Ordinal)))
@@ -459,7 +666,7 @@ namespace AnyBase.Net
                         }
 
                         _pending.Clear();
-                        if (AddDigit(exact.Index, out decodedByte))
+                        if (AddToken(exact, out decodedByte))
                         {
                             EnsureCompleteByteGroup();
                             return true;
@@ -477,6 +684,47 @@ namespace AnyBase.Net
                 EnsureCompleteByteGroup();
                 decodedByte = 0;
                 return false;
+            }
+
+            private bool AddToken(TextToken token, out byte decodedByte)
+            {
+                if (_codec.Mode != EncodingMode.Packed)
+                {
+                    return AddDigit(token.Index, out decodedByte);
+                }
+
+                if (token.IsPadding)
+                {
+                    _packedSawPadding = true;
+                    _packedPaddingCount++;
+                    _symbolIndex++;
+                    decodedByte = 0;
+                    return false;
+                }
+
+                if (_packedSawPadding)
+                {
+                    throw new FormatException(
+                        $"Packed input contains a data symbol after padding at symbol index {_symbolIndex}.");
+                }
+
+                var bitsPerSymbol = _codec.PackedBitsPerSymbol;
+                _packedBuffer = (_packedBuffer << bitsPerSymbol) | token.Index;
+                _packedBits += bitsPerSymbol;
+                _packedDataSymbolCount++;
+                _symbolIndex++;
+                if (_packedBits < 8)
+                {
+                    decodedByte = 0;
+                    return false;
+                }
+
+                _packedBits -= 8;
+                decodedByte = (byte)((_packedBuffer >> _packedBits) & byte.MaxValue);
+                _packedBuffer = _packedBits == 0
+                    ? 0
+                    : _packedBuffer & ((1 << _packedBits) - 1);
+                return true;
             }
 
             private bool AddDigit(int digit, out byte decodedByte)
@@ -506,6 +754,16 @@ namespace AnyBase.Net
 
             private void EnsureCompleteByteGroup()
             {
+                if (_codec.Mode == EncodingMode.Packed)
+                {
+                    _codec.ValidatePackedTerminal(
+                        _packedDataSymbolCount,
+                        _packedPaddingCount,
+                        _packedBits,
+                        _packedBuffer);
+                    return;
+                }
+
                 if (_groupOffset == 0)
                 {
                     return;
@@ -520,11 +778,12 @@ namespace AnyBase.Net
 
         private sealed class TextToken
         {
-            public TextToken(string text, int index, string? separator)
+            public TextToken(string text, int index, string? separator, bool isPadding = false)
             {
                 Text = text;
                 Index = index;
                 BoundaryText = separator == null ? text : text + separator;
+                IsPadding = isPadding;
             }
 
             public string Text { get; }
@@ -532,6 +791,8 @@ namespace AnyBase.Net
             public int Index { get; }
 
             public string BoundaryText { get; }
+
+            public bool IsPadding { get; }
         }
     }
 }

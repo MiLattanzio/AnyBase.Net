@@ -11,7 +11,7 @@
     <Description>Encode and decode text or binary data from the command line with any ordered alphabet.</Description>
     <PackageTags>dotnet-tool;encoding;base-conversion;radix;cli</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Adds raw binary stdin, stdout and file processing plus explicit text, binary and hexadecimal input/output formats.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds fixed and packed modes, RFC 4648 presets, and configurable padding.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

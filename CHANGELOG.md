@@ -4,6 +4,30 @@ Le modifiche rilevanti di AnyBase.Net sono documentate in questo file.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/)
 e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 
+## [1.4.0] - 2026-08-04
+
+### Added
+
+- `EncodingMode.FixedWidthByte` e `EncodingMode.Packed`, selezionabili senza
+  cambiare il comportamento predefinito compatibile con le versioni 1.x.
+- Factory packed conformi a RFC 4648 per Base16, Base32, Base64 e Base64
+  URL-safe, con padding configurabile e validazione canonica dei pad bit.
+- Conservazione esplicita degli zero iniziali nel bitstream packed.
+- Supporto packed incrementale per stream sincroni e asincroni, inclusi buffer
+  che dividono i quantum di codifica.
+- Opzioni CLI `--mode fixed|packed` e `--padding include|omit`, con preset RFC
+  distinti `rfc-base16`, `rfc-base32`, `rfc-base64` e `rfc-base64url`.
+- Selettori di modalita e padding nel playground, preset RFC separati e
+  condivisione della configurazione completa tramite URL.
+- Test sui vettori ufficiali RFC 4648, confronto con `Convert` di .NET, zero
+  iniziali, padding, canonicalita, span, stream e pacchetti installati.
+
+### Changed
+
+- `FixedWidthByte` resta la modalita predefinita; le factory storiche
+  `CreateBase32`, `CreateBase64` e `CreateBase64Url` non cambiano formato.
+- La validazione del pacchetto confronta l'API pubblica con AnyBase.Net 1.3.0.
+
 ## [1.3.0] - 2026-08-02
 
 ### Added
@@ -88,7 +112,8 @@ e il progetto usa [Semantic Versioning](https://semver.org/lang/it/).
 - Aggiornamento a NumeralSystems.Net 5.3.0.
 - Round-trip UTF-8, alfabeti ordinati deterministici e validazione più rigorosa.
 
-[1.3.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.2.0...HEAD
+[1.4.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/MiLattanzio/AnyBase.Net/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/MiLattanzio/AnyBase.Net/releases/tag/v1.1.0

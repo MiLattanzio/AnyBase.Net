@@ -57,6 +57,64 @@ public class CliApplicationTest
         });
     }
 
+    [TestCase("rfc-base16", "foobar", "666F6F626172")]
+    [TestCase("rfc-base32", "foobar", "MZXW6YTBOI======")]
+    [TestCase("rfc-base64", "foobar", "Zm9vYmFy")]
+    public async Task RunAsync_UsesClearlyNamedPackedRfcPresets(
+        string preset,
+        string value,
+        string expected)
+    {
+        var encoded = await RunAsync(
+            "encode", value,
+            "--mode", "packed",
+            "--alphabet", preset);
+        var decoded = await RunAsync(
+            "decode", expected,
+            "--mode", "packed",
+            "--alphabet", preset);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(encoded.ExitCode, Is.Zero);
+            Assert.That(encoded.Output.TrimEnd(), Is.EqualTo(expected));
+            Assert.That(decoded.Output.TrimEnd(), Is.EqualTo(value));
+            Assert.That(encoded.Error, Is.Empty);
+            Assert.That(decoded.Error, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_PackedPaddingCanBeOmitted()
+    {
+        var result = await RunAsync(
+            "encode", "f",
+            "--mode", "packed",
+            "--alphabet", "rfc-base64",
+            "--padding", "omit");
+
+        Assert.That(result.Output.TrimEnd(), Is.EqualTo("Zg"));
+    }
+
+    [Test]
+    public async Task RunAsync_PackedBinaryInputPreservesLeadingZeros()
+    {
+        var result = await RunBinaryAsync(
+            new byte[] { 0, 0, 1 },
+            "encode",
+            "--mode", "packed",
+            "--alphabet", "rfc-base64",
+            "--input-format", "binary",
+            "--output-format", "binary");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Zero);
+            Assert.That(result.Output, Is.EqualTo("AAAB"u8.ToArray()));
+            Assert.That(result.Error, Is.Empty);
+        });
+    }
+
     [Test]
     public async Task RunAsync_ReadsRedirectedInput()
     {
@@ -175,6 +233,14 @@ public class CliApplicationTest
     [TestCase("encode", "A", "--output-format", "base64")]
     [TestCase("encode", "ABC", "--input-format", "hex")]
     [TestCase("decode", "4Z", "--base", "16")]
+    [TestCase("encode", "f", "--mode", "compact")]
+    [TestCase("encode", "f", "--padding", "sometimes")]
+    [TestCase("encode", "f", "--padding", "omit")]
+    [TestCase("encode", "f", "--mode", "packed", "--alphabet", "base64")]
+    [TestCase("encode", "f", "--alphabet", "rfc-base64")]
+    [TestCase("encode", "f", "--mode", "packed", "--alphabet", "rfc-base16", "--padding", "include")]
+    [TestCase("encode", "f", "--mode", "packed", "--alphabet", "0123456789")]
+    [TestCase("encode", "f", "--mode", "packed", "--separator", "-")]
     public async Task RunAsync_InvalidInput_ReturnsUsageError(params string[] args)
     {
         var result = await RunAsync(args);

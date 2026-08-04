@@ -15,6 +15,10 @@ namespace AnyBase.Net
     {
         private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private readonly IReadOnlyDictionary<TBase, int> _indices;
+        private readonly bool _supportsPadding;
+        private readonly TBase _paddingSymbol = default!;
+        private EncodingMode _mode;
+        private bool _usePadding;
         private int _size;
 
         /// <summary>
@@ -26,6 +30,71 @@ namespace AnyBase.Net
         /// Gets the comparer used to validate and look up symbols.
         /// </summary>
         public IEqualityComparer<TBase> Comparer { get; }
+
+        /// <summary>
+        /// Gets or sets how bytes are mapped to alphabet symbols.
+        /// </summary>
+        /// <remarks>
+        /// The default is <see cref="EncodingMode.FixedWidthByte"/> for compatibility
+        /// with every AnyBase.Net 1.x release. Packed mode requires an alphabet whose
+        /// size is a power of two between 2 and 256.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is not a defined encoding mode.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Packed mode is selected for an alphabet whose size is not a power of two from 2 through 256.
+        /// </exception>
+        public EncodingMode Mode
+        {
+            get => _mode;
+            set
+            {
+                ValidateEncodingMode(value);
+                if (value == EncodingMode.Packed)
+                {
+                    ValidatePackedAlphabet();
+                }
+
+                _mode = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets whether this codec was configured with a padding symbol.
+        /// </summary>
+        public bool SupportsPadding => _supportsPadding;
+
+        /// <summary>
+        /// Gets the padding symbol configured for packed output.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">No padding symbol was configured.</exception>
+        public TBase PaddingSymbol => _supportsPadding
+            ? _paddingSymbol
+            : throw new InvalidOperationException("This codec has no padding symbol configured.");
+
+        /// <summary>
+        /// Gets or sets whether packed output is completed to a full encoding quantum.
+        /// </summary>
+        /// <remarks>
+        /// RFC 4648 Base32 and Base64 factories enable padding by default. Disabling it
+        /// produces the common unpadded form and makes the decoder require that form.
+        /// This property has no effect in fixed-width mode.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// The value is set to <see langword="true"/> but no padding symbol is configured.
+        /// </exception>
+        public bool UsePadding
+        {
+            get => _usePadding;
+            set
+            {
+                if (value && !_supportsPadding)
+                {
+                    throw new InvalidOperationException("A padding symbol must be configured before enabling padding.");
+                }
+
+                _usePadding = value;
+            }
+        }
 
         /// <summary>
         /// Gets or sets the fixed number of symbols used to encode each byte.
@@ -103,6 +172,94 @@ namespace AnyBase.Net
         /// The alphabet contains fewer than two symbols, duplicate symbols, or a null symbol.
         /// </exception>
         public Base(IEnumerable<TBase> identity, IEqualityComparer<TBase> comparer)
+            : this(
+                identity,
+                comparer,
+                EncodingMode.FixedWidthByte,
+                hasPaddingSymbol: false,
+                paddingSymbol: default!,
+                usePadding: false)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a base using an explicit encoding mode.
+        /// </summary>
+        /// <param name="identity">The ordered alphabet. At least two unique symbols are required.</param>
+        /// <param name="mode">The byte-to-symbol encoding mode.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="identity"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="mode"/> is not defined.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Packed mode is selected for an alphabet whose size is not a power of two from 2 through 256.
+        /// </exception>
+        public Base(IEnumerable<TBase> identity, EncodingMode mode)
+            : this(identity, EqualityComparer<TBase>.Default, mode)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a base using a custom comparer and explicit encoding mode.
+        /// </summary>
+        /// <param name="identity">The ordered alphabet. At least two unique symbols are required.</param>
+        /// <param name="comparer">The comparer used for symbol uniqueness and lookup.</param>
+        /// <param name="mode">The byte-to-symbol encoding mode.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="identity"/> or <paramref name="comparer"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="mode"/> is not defined.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Packed mode is selected for an alphabet whose size is not a power of two from 2 through 256.
+        /// </exception>
+        public Base(
+            IEnumerable<TBase> identity,
+            IEqualityComparer<TBase> comparer,
+            EncodingMode mode)
+            : this(
+                identity,
+                comparer,
+                mode,
+                hasPaddingSymbol: false,
+                paddingSymbol: default!,
+                usePadding: false)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a base using an explicit encoding mode and padding configuration.
+        /// </summary>
+        /// <param name="identity">The ordered alphabet.</param>
+        /// <param name="comparer">The comparer used for symbol uniqueness and lookup.</param>
+        /// <param name="mode">The encoding mode.</param>
+        /// <param name="paddingSymbol">A symbol that does not occur in the alphabet.</param>
+        /// <param name="usePadding">Whether packed encodings include and require padding.</param>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="identity"/>, <paramref name="comparer"/>, or <paramref name="paddingSymbol"/>
+        /// is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        /// The alphabet is invalid or contains <paramref name="paddingSymbol"/>.
+        /// </exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="mode"/> is not defined.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Packed mode is selected for an alphabet whose size is not a power of two from 2 through 256.
+        /// </exception>
+        public Base(
+            IEnumerable<TBase> identity,
+            IEqualityComparer<TBase> comparer,
+            EncodingMode mode,
+            TBase paddingSymbol,
+            bool usePadding)
+            : this(identity, comparer, mode, true, paddingSymbol, usePadding)
+        {
+        }
+
+        private Base(
+            IEnumerable<TBase> identity,
+            IEqualityComparer<TBase> comparer,
+            EncodingMode mode,
+            bool hasPaddingSymbol,
+            TBase paddingSymbol,
+            bool usePadding)
         {
             if (identity == null)
             {
@@ -113,6 +270,8 @@ namespace AnyBase.Net
             {
                 throw new ArgumentNullException(nameof(comparer));
             }
+
+            ValidateEncodingMode(mode);
 
             var values = identity.ToList();
             var validation = AlphabetValidator.ValidateMaterialized(
@@ -133,6 +292,29 @@ namespace AnyBase.Net
                 .ToDictionary(pair => pair.Key, pair => pair.Value, comparer);
             NumeralSystem = Numeral.System.OfBase(Identity.Count);
             _size = NumeralSystem.Length;
+            _supportsPadding = hasPaddingSymbol;
+            if (hasPaddingSymbol)
+            {
+                if (paddingSymbol is null)
+                {
+                    throw new ArgumentNullException(nameof(paddingSymbol));
+                }
+
+                if (_indices.ContainsKey(paddingSymbol))
+                {
+                    throw new ArgumentException("The padding symbol must not occur in the alphabet.", nameof(paddingSymbol));
+                }
+
+                _paddingSymbol = paddingSymbol;
+            }
+
+            _mode = mode;
+            if (mode == EncodingMode.Packed)
+            {
+                ValidatePackedAlphabet();
+            }
+
+            UsePadding = usePadding;
         }
 
         /// <summary>
@@ -149,14 +331,20 @@ namespace AnyBase.Net
                 throw new ArgumentOutOfRangeException(nameof(byteCount), byteCount, "Byte count cannot be negative.");
             }
 
-            return checked(byteCount * Size);
+            return Mode == EncodingMode.FixedWidthByte
+                ? checked(byteCount * Size)
+                : GetPackedEncodedLength(byteCount);
         }
 
         /// <summary>
-        /// Calculates the exact byte count represented by a complete encoded symbol sequence.
+        /// Calculates the byte buffer size needed for an encoded symbol count.
         /// </summary>
         /// <param name="symbolCount">The non-negative encoded symbol count.</param>
-        /// <returns>The exact decoded byte count.</returns>
+        /// <returns>
+        /// The exact decoded byte count in fixed-width mode; in packed mode, the maximum
+        /// byte count because a count alone does not identify trailing padding symbols.
+        /// Use <see cref="GetDecodedLength(ReadOnlySpan{TBase})"/> for the exact packed length.
+        /// </returns>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="symbolCount"/> is negative.</exception>
         /// <exception cref="FormatException"><paramref name="symbolCount"/> is not a multiple of <see cref="Size"/>.</exception>
         public int GetDecodedLength(int symbolCount)
@@ -167,6 +355,11 @@ namespace AnyBase.Net
                     nameof(symbolCount),
                     symbolCount,
                     "Symbol count cannot be negative.");
+            }
+
+            if (Mode == EncodingMode.Packed)
+            {
+                return checked((int)(checked((long)symbolCount * GetPackedBitsPerSymbol()) / 8));
             }
 
             if (!TryGetDecodedLength(symbolCount, out var byteCount))
@@ -182,20 +375,41 @@ namespace AnyBase.Net
         }
 
         /// <summary>
-        /// Tries to calculate the byte count represented by an encoded symbol count.
+        /// Calculates the exact decoded byte count after validating packed padding and symbol layout.
+        /// </summary>
+        /// <param name="encoded">The encoded symbols.</param>
+        /// <returns>The exact decoded byte count.</returns>
+        /// <exception cref="FormatException">The packed symbol count, padding, or pad bits are invalid.</exception>
+        public int GetDecodedLength(ReadOnlySpan<TBase> encoded)
+        {
+            return Mode == EncodingMode.FixedWidthByte
+                ? GetDecodedLength(encoded.Length)
+                : AnalyzePacked(encoded).DecodedLength;
+        }
+
+        /// <summary>
+        /// Tries to calculate the byte buffer size needed for an encoded symbol count.
         /// </summary>
         /// <param name="symbolCount">The encoded symbol count.</param>
-        /// <param name="byteCount">The decoded byte count, or zero when the count is invalid.</param>
-        /// <returns><see langword="true"/> when <paramref name="symbolCount"/> is non-negative and complete.</returns>
+        /// <param name="byteCount">
+        /// The exact fixed-width byte count or the maximum packed byte count; zero when invalid.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> when <paramref name="symbolCount"/> is non-negative and,
+        /// in fixed-width mode, contains complete byte groups.
+        /// </returns>
         public bool TryGetDecodedLength(int symbolCount, out int byteCount)
         {
-            if (symbolCount < 0 || symbolCount % Size != 0)
+            if (symbolCount < 0 ||
+                (Mode == EncodingMode.FixedWidthByte && symbolCount % Size != 0))
             {
                 byteCount = 0;
                 return false;
             }
 
-            byteCount = symbolCount / Size;
+            byteCount = Mode == EncodingMode.FixedWidthByte
+                ? symbolCount / Size
+                : checked((int)(checked((long)symbolCount * GetPackedBitsPerSymbol()) / 8));
             return true;
         }
 
@@ -219,6 +433,15 @@ namespace AnyBase.Net
             }
 
             var maximumTokenLength = tokens.Max(token => token.Text.Length);
+            if (Mode == EncodingMode.Packed)
+            {
+                var dataSymbolCount = GetPackedDataSymbolCount(byteCount);
+                var paddingCount = symbolCount - dataSymbolCount;
+                return checked(
+                    checked(dataSymbolCount * maximumTokenLength) +
+                    checked(paddingCount * GetPaddingText().Length));
+            }
+
             return checked(
                 checked(symbolCount * maximumTokenLength) +
                 checked((symbolCount - 1) * (separator?.Length ?? 0)));
@@ -239,6 +462,11 @@ namespace AnyBase.Net
                 : GetTextTokensForSeparatedStringOperations(separator);
             var textLength = 0;
             var symbolCount = GetEncodedLength(bytes.Length);
+
+            if (Mode == EncodingMode.Packed)
+            {
+                return GetPackedEncodedTextLength(bytes, tokens);
+            }
 
             for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
             {
@@ -276,6 +504,11 @@ namespace AnyBase.Net
                     nameof(destination));
             }
 
+            if (Mode == EncodingMode.Packed)
+            {
+                return EncodePacked(bytes, destination);
+            }
+
             for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
             {
                 var value = (int)bytes[byteIndex];
@@ -311,12 +544,17 @@ namespace AnyBase.Net
         /// <exception cref="FormatException">The input is incomplete, contains an unknown symbol, or exceeds 255.</exception>
         public int Decode(ReadOnlySpan<TBase> encoded, Span<byte> destination)
         {
-            var requiredLength = GetDecodedLength(encoded.Length);
+            var requiredLength = GetDecodedLength(encoded);
             if (destination.Length < requiredLength)
             {
                 throw new ArgumentException(
                     $"Destination length {destination.Length} is smaller than the required decoded length {requiredLength}.",
                     nameof(destination));
+            }
+
+            if (Mode == EncodingMode.Packed)
+            {
+                return DecodePacked(encoded, destination, requiredLength);
             }
 
             for (var group = 0; group < requiredLength; group++)
@@ -393,7 +631,7 @@ namespace AnyBase.Net
             }
 
             var tokens = GetTextTokensForStringOperations();
-            return string.Concat(Encode(bytes).Select(symbol => tokens[_indices[symbol]].Text));
+            return string.Concat(Encode(bytes).Select(symbol => GetEncodedSymbolText(symbol, tokens)));
         }
 
         /// <inheritdoc />
@@ -405,7 +643,7 @@ namespace AnyBase.Net
             }
 
             var tokens = GetTextTokensForStringOperations();
-            return string.Concat(Encode(value).Select(symbol => tokens[_indices[symbol]].Text));
+            return string.Concat(Encode(value).Select(symbol => GetEncodedSymbolText(symbol, tokens)));
         }
 
         /// <summary>
@@ -422,7 +660,7 @@ namespace AnyBase.Net
             }
 
             var tokens = GetTextTokensForSeparatedStringOperations(separator);
-            return string.Join(separator, Encode(bytes).Select(symbol => tokens[_indices[symbol]].Text));
+            return string.Join(separator, Encode(bytes).Select(symbol => GetEncodedSymbolText(symbol, tokens)));
         }
 
         /// <summary>
@@ -439,7 +677,7 @@ namespace AnyBase.Net
             }
 
             var tokens = GetTextTokensForSeparatedStringOperations(separator);
-            return string.Join(separator, Encode(value).Select(symbol => tokens[_indices[symbol]].Text));
+            return string.Join(separator, Encode(value).Select(symbol => GetEncodedSymbolText(symbol, tokens)));
         }
 
         /// <inheritdoc />
@@ -483,7 +721,7 @@ namespace AnyBase.Net
                 return Array.Empty<byte>();
             }
 
-            var orderedTokens = tokens
+            var orderedTokens = GetDecodingTextTokens(tokens)
                 .OrderByDescending(token => token.Text.Length)
                 .ThenBy(token => token.Index)
                 .ToArray();
@@ -504,7 +742,7 @@ namespace AnyBase.Net
                         $"Remaining input starts with '{preview}'.");
                 }
 
-                symbols.Add(Identity[token.Index]);
+                symbols.Add(token.Index >= 0 ? Identity[token.Index] : PaddingSymbol);
                 position += token.Text.Length;
             }
 
@@ -592,7 +830,7 @@ namespace AnyBase.Net
                 return Array.Empty<byte>();
             }
 
-            var output = new byte[GetDecodedLength(encoded.Length)];
+            var output = new byte[GetDecodedLength(encoded.AsSpan())];
             Decode(encoded.AsSpan(), output.AsSpan());
             return output;
         }
@@ -605,6 +843,297 @@ namespace AnyBase.Net
             }
 
             throw new InvalidOperationException("The encoded symbol is not present in the codec identity.");
+        }
+
+        internal int PackedBitsPerSymbol => GetPackedBitsPerSymbol();
+
+        internal int PackedInputQuantumBytes => GetPackedBitsPerSymbol() / GreatestCommonDivisor(8, GetPackedBitsPerSymbol());
+
+        internal bool IsPaddingSymbol(TBase symbol)
+        {
+            return _supportsPadding && symbol != null && Comparer.Equals(symbol, _paddingSymbol);
+        }
+
+        internal void ValidatePackedTerminal(
+            int dataSymbolCount,
+            int paddingCount,
+            int remainingBitCount,
+            int remainingValue)
+        {
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var decodedByteCount = checked((int)(checked((long)dataSymbolCount * bitsPerSymbol) / 8));
+            var canonicalDataSymbolCount = decodedByteCount == 0
+                ? 0
+                : checked((int)((checked((long)decodedByteCount * 8) + bitsPerSymbol - 1) / bitsPerSymbol));
+            if (canonicalDataSymbolCount != dataSymbolCount)
+            {
+                throw new FormatException(
+                    $"Packed symbol count {dataSymbolCount} cannot represent a complete byte sequence " +
+                    $"with {bitsPerSymbol} bits per symbol.");
+            }
+
+            if (remainingBitCount > 0 && remainingValue != 0)
+            {
+                throw new FormatException(
+                    $"Packed input has non-zero pad bits in the final symbol; " +
+                    $"the remaining {remainingBitCount} bits must be zero for a canonical encoding.");
+            }
+
+            var quantumSymbols = 8 / GreatestCommonDivisor(8, bitsPerSymbol);
+            var remainder = dataSymbolCount % quantumSymbols;
+            var requiredPadding = remainder == 0 ? 0 : quantumSymbols - remainder;
+            if (UsePadding && paddingCount != requiredPadding)
+            {
+                throw new FormatException(
+                    $"Packed input requires {requiredPadding} padding symbol(s) after {dataSymbolCount} data symbol(s), " +
+                    $"but found {paddingCount}.");
+            }
+
+            if (!UsePadding && paddingCount != 0)
+            {
+                throw new FormatException("Packed input contains padding while padding is disabled.");
+            }
+        }
+
+        private int GetPackedEncodedLength(int byteCount)
+        {
+            var dataSymbolCount = GetPackedDataSymbolCount(byteCount);
+            if (!UsePadding || dataSymbolCount == 0)
+            {
+                return dataSymbolCount;
+            }
+
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var quantumSymbols = 8 / GreatestCommonDivisor(8, bitsPerSymbol);
+            return checked(((dataSymbolCount + quantumSymbols - 1) / quantumSymbols) * quantumSymbols);
+        }
+
+        private int GetPackedDataSymbolCount(int byteCount)
+        {
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            return byteCount == 0
+                ? 0
+                : checked((int)((checked((long)byteCount * 8) + bitsPerSymbol - 1) / bitsPerSymbol));
+        }
+
+        private int GetPackedEncodedTextLength(ReadOnlySpan<byte> bytes, SymbolToken[] tokens)
+        {
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var buffer = 0;
+            var bufferedBits = 0;
+            var textLength = 0;
+            var dataSymbolCount = 0;
+
+            for (var index = 0; index < bytes.Length; index++)
+            {
+                buffer = (buffer << 8) | bytes[index];
+                bufferedBits += 8;
+                while (bufferedBits >= bitsPerSymbol)
+                {
+                    bufferedBits -= bitsPerSymbol;
+                    var digit = (buffer >> bufferedBits) & (Identity.Count - 1);
+                    textLength = checked(textLength + tokens[digit].Text.Length);
+                    dataSymbolCount++;
+                }
+
+                buffer = bufferedBits == 0 ? 0 : buffer & ((1 << bufferedBits) - 1);
+            }
+
+            if (bufferedBits > 0)
+            {
+                var digit = (buffer << (bitsPerSymbol - bufferedBits)) & (Identity.Count - 1);
+                textLength = checked(textLength + tokens[digit].Text.Length);
+                dataSymbolCount++;
+            }
+
+            var paddingCount = GetEncodedLength(bytes.Length) - dataSymbolCount;
+            return checked(textLength + checked(paddingCount * GetPaddingText().Length));
+        }
+
+        private int EncodePacked(ReadOnlySpan<byte> bytes, Span<TBase> destination)
+        {
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var buffer = 0;
+            var bufferedBits = 0;
+            var written = 0;
+
+            for (var index = 0; index < bytes.Length; index++)
+            {
+                buffer = (buffer << 8) | bytes[index];
+                bufferedBits += 8;
+                while (bufferedBits >= bitsPerSymbol)
+                {
+                    bufferedBits -= bitsPerSymbol;
+                    destination[written++] = Identity[(buffer >> bufferedBits) & (Identity.Count - 1)];
+                }
+
+                buffer = bufferedBits == 0 ? 0 : buffer & ((1 << bufferedBits) - 1);
+            }
+
+            if (bufferedBits > 0)
+            {
+                destination[written++] = Identity[
+                    (buffer << (bitsPerSymbol - bufferedBits)) & (Identity.Count - 1)];
+            }
+
+            var requiredLength = GetEncodedLength(bytes.Length);
+            while (written < requiredLength)
+            {
+                destination[written++] = PaddingSymbol;
+            }
+
+            return written;
+        }
+
+        private int DecodePacked(
+            ReadOnlySpan<TBase> encoded,
+            Span<byte> destination,
+            int requiredLength)
+        {
+            var analysis = AnalyzePacked(encoded);
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var buffer = 0;
+            var bufferedBits = 0;
+            var written = 0;
+
+            for (var index = 0; index < analysis.DataSymbolCount; index++)
+            {
+                var digit = _indices[encoded[index]];
+                buffer = (buffer << bitsPerSymbol) | digit;
+                bufferedBits += bitsPerSymbol;
+                if (bufferedBits >= 8)
+                {
+                    bufferedBits -= 8;
+                    destination[written++] = (byte)((buffer >> bufferedBits) & byte.MaxValue);
+                    buffer = bufferedBits == 0 ? 0 : buffer & ((1 << bufferedBits) - 1);
+                }
+            }
+
+            if (written != requiredLength)
+            {
+                throw new InvalidOperationException("Packed decoding produced an unexpected byte count.");
+            }
+
+            return written;
+        }
+
+        private PackedAnalysis AnalyzePacked(ReadOnlySpan<TBase> encoded)
+        {
+            var bitsPerSymbol = GetPackedBitsPerSymbol();
+            var buffer = 0;
+            var bufferedBits = 0;
+            var dataSymbolCount = 0;
+            var paddingCount = 0;
+            var sawPadding = false;
+
+            for (var index = 0; index < encoded.Length; index++)
+            {
+                var symbol = encoded[index];
+                if (IsPaddingSymbol(symbol))
+                {
+                    sawPadding = true;
+                    paddingCount++;
+                    continue;
+                }
+
+                if (sawPadding)
+                {
+                    throw new FormatException($"Packed input contains a data symbol after padding at symbol index {index}.");
+                }
+
+                if (symbol is null || !_indices.TryGetValue(symbol, out var digit))
+                {
+                    throw new FormatException(
+                        $"Unknown identity symbol {DescribeSymbol(symbol!)} at packed symbol index {index}.");
+                }
+
+                buffer = (buffer << bitsPerSymbol) | digit;
+                bufferedBits += bitsPerSymbol;
+                if (bufferedBits >= 8)
+                {
+                    bufferedBits -= 8;
+                    buffer = bufferedBits == 0 ? 0 : buffer & ((1 << bufferedBits) - 1);
+                }
+
+                dataSymbolCount++;
+            }
+
+            ValidatePackedTerminal(dataSymbolCount, paddingCount, bufferedBits, buffer);
+            var decodedLength = checked((int)(checked((long)dataSymbolCount * bitsPerSymbol) / 8));
+            return new PackedAnalysis(dataSymbolCount, paddingCount, decodedLength);
+        }
+
+        private string GetEncodedSymbolText(TBase symbol, SymbolToken[] tokens)
+        {
+            return IsPaddingSymbol(symbol)
+                ? GetPaddingText()
+                : tokens[GetIdentityIndex(symbol)].Text;
+        }
+
+        private string GetPaddingText()
+        {
+            return AlphabetValidator.SymbolText(PaddingSymbol);
+        }
+
+        private IEnumerable<SymbolToken> GetDecodingTextTokens(SymbolToken[] tokens)
+        {
+            if (Mode != EncodingMode.Packed || !_supportsPadding)
+            {
+                return tokens;
+            }
+
+            var paddingText = GetPaddingText();
+            if (paddingText.Length == 0 || tokens.Any(token =>
+                    token.Text.StartsWith(paddingText, StringComparison.Ordinal) ||
+                    paddingText.StartsWith(token.Text, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    "The padding symbol text must be non-empty and prefix-distinct from every alphabet symbol.");
+            }
+
+            return tokens.Concat(new[] { new SymbolToken(paddingText, -1) });
+        }
+
+        private static void ValidateEncodingMode(EncodingMode mode)
+        {
+            if (!Enum.IsDefined(typeof(EncodingMode), mode))
+            {
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown encoding mode.");
+            }
+        }
+
+        private void ValidatePackedAlphabet()
+        {
+            var count = Identity.Count;
+            if (count < 2 || count > 256 || (count & (count - 1)) != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Packed mode requires a power-of-two alphabet size between 2 and 256; found {count}.");
+            }
+        }
+
+        private int GetPackedBitsPerSymbol()
+        {
+            ValidatePackedAlphabet();
+            var bits = 0;
+            for (var count = Identity.Count; count > 1; count >>= 1)
+            {
+                bits++;
+            }
+
+            return bits;
+        }
+
+        private static int GreatestCommonDivisor(int left, int right)
+        {
+            while (right != 0)
+            {
+                var remainder = left % right;
+                left = right;
+                right = remainder;
+            }
+
+            return left;
         }
 
         private string DecodeUtf8(byte[] bytes)
@@ -630,11 +1159,19 @@ namespace AnyBase.Net
                 separator: null,
                 useSeparator: false);
             ThrowIfTextIncompatible(validation, nameof(Identity));
-            return CreateTextTokens();
+            var tokens = CreateTextTokens();
+            _ = GetDecodingTextTokens(tokens).ToArray();
+            return tokens;
         }
 
         private SymbolToken[] GetTextTokensForSeparatedStringOperations(string separator)
         {
+            if (Mode == EncodingMode.Packed)
+            {
+                throw new InvalidOperationException(
+                    "Packed mode does not support symbol separators because they are not part of RFC 4648 encodings.");
+            }
+
             if (separator == null)
             {
                 throw new ArgumentNullException(nameof(separator));
@@ -698,6 +1235,22 @@ namespace AnyBase.Net
             public string Text { get; }
 
             public int Index { get; }
+        }
+
+        private readonly struct PackedAnalysis
+        {
+            public PackedAnalysis(int dataSymbolCount, int paddingCount, int decodedLength)
+            {
+                DataSymbolCount = dataSymbolCount;
+                PaddingCount = paddingCount;
+                DecodedLength = decodedLength;
+            }
+
+            public int DataSymbolCount { get; }
+
+            public int PaddingCount { get; }
+
+            public int DecodedLength { get; }
         }
     }
 }

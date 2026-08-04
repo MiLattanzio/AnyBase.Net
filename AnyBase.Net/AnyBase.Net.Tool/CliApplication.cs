@@ -69,8 +69,7 @@ public static class CliApplication
                 return 0;
             }
 
-            var alphabet = ResolveAlphabet(options);
-            var codec = new Base<char>(alphabet);
+            var codec = ResolveCodec(options);
             await using var input = await ResolveInputAsync(options, standardInput, cancellationToken);
 
             if (options.OutputFormat == DataFormat.Binary)
@@ -157,6 +156,8 @@ public static class CliApplication
         string? separator = null;
         var inputFormat = DataFormat.Text;
         var outputFormat = DataFormat.Text;
+        var encodingMode = EncodingMode.FixedWidthByte;
+        bool? usePadding = null;
         var helpRequested = false;
 
         for (var index = 1; index < args.Length; index++)
@@ -199,6 +200,12 @@ public static class CliApplication
                 case "--output-format":
                     outputFormat = ParseFormat(ReadOptionValue(args, ref index), "--output-format");
                     break;
+                case "--mode":
+                    encodingMode = ParseEncodingMode(ReadOptionValue(args, ref index));
+                    break;
+                case "--padding":
+                    usePadding = ParsePadding(ReadOptionValue(args, ref index));
+                    break;
                 default:
                     if (args[index].StartsWith("-", StringComparison.Ordinal))
                     {
@@ -240,6 +247,8 @@ public static class CliApplication
             separator,
             inputFormat,
             outputFormat,
+            encodingMode,
+            usePadding,
             helpRequested);
     }
 
@@ -254,6 +263,26 @@ public static class CliApplication
         };
     }
 
+    private static EncodingMode ParseEncodingMode(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "fixed" => EncodingMode.FixedWidthByte,
+            "packed" => EncodingMode.Packed,
+            _ => throw new CliException($"--mode must be fixed or packed; found '{value}'.")
+        };
+    }
+
+    private static bool ParsePadding(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "include" => true,
+            "omit" => false,
+            _ => throw new CliException($"--padding must be include or omit; found '{value}'.")
+        };
+    }
+
     private static string ReadOptionValue(string[] args, ref int index)
     {
         if (++index >= args.Length)
@@ -264,26 +293,125 @@ public static class CliApplication
         return args[index];
     }
 
-    private static string ResolveAlphabet(CliOptions options)
+    private static Base<char> ResolveCodec(CliOptions options)
     {
+        if (options.Alphabet != null && TryCreateRfcCodec(options, out var rfcCodec))
+        {
+            return rfcCodec;
+        }
+
+        if (options.Mode == EncodingMode.Packed && options.Separator != null)
+        {
+            throw new CliException("--separator is available only with --mode fixed.");
+        }
+
+        string alphabet;
         if (options.Alphabet != null)
         {
-            var alphabet = AnyBaseAlphabets.TryGet(options.Alphabet, out var preset)
+            if (IsHistoricalStandardPreset(options.Alphabet) && options.Mode == EncodingMode.Packed)
+            {
+                throw new CliException(
+                    $"Preset '{options.Alphabet}' is the historical fixed-width alphabet. " +
+                    $"Use 'rfc-{options.Alphabet.ToLowerInvariant()}' for packed RFC 4648 encoding.");
+            }
+
+            alphabet = AnyBaseAlphabets.TryGet(options.Alphabet, out var preset)
                 ? preset
                 : options.Alphabet;
-            ValidateAlphabet(alphabet, options.Separator);
-            return alphabet;
         }
-
-        var numberBase = options.NumberBase ?? 16;
-        if (numberBase is < 2 or > 64)
+        else
         {
-            throw new CliException("--base must be between 2 and 64.");
+            var numberBase = options.NumberBase ?? 16;
+            if (numberBase is < 2 or > 64)
+            {
+                throw new CliException("--base must be between 2 and 64.");
+            }
+
+            alphabet = DefaultAlphabet[..numberBase];
         }
 
-        var resolved = DefaultAlphabet[..numberBase];
-        ValidateAlphabet(resolved, options.Separator);
-        return resolved;
+        ValidateAlphabet(alphabet, options.Separator);
+        if (options.Mode == EncodingMode.FixedWidthByte)
+        {
+            if (options.UsePadding != null)
+            {
+                throw new CliException("--padding is available only with --mode packed.");
+            }
+
+            return AnyBase.Create(alphabet);
+        }
+
+        var usePadding = options.UsePadding ?? false;
+        return usePadding
+            ? new Base<char>(
+                alphabet,
+                EqualityComparer<char>.Default,
+                EncodingMode.Packed,
+                '=',
+                usePadding: true)
+            : AnyBase.Create(alphabet, EncodingMode.Packed);
+    }
+
+    private static bool TryCreateRfcCodec(CliOptions options, out Base<char> codec)
+    {
+        codec = null!;
+        var name = options.Alphabet!;
+        if (!name.StartsWith("rfc-", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (options.Mode != EncodingMode.Packed)
+        {
+            throw new CliException($"RFC preset '{name}' requires --mode packed.");
+        }
+
+        if (options.Separator != null)
+        {
+            throw new CliException("RFC 4648 presets do not support --separator.");
+        }
+
+        var defaultPadding = !name.Equals("rfc-base16", StringComparison.OrdinalIgnoreCase);
+        var usePadding = options.UsePadding ?? defaultPadding;
+        if (name.Equals("rfc-base16", StringComparison.OrdinalIgnoreCase))
+        {
+            if (usePadding)
+            {
+                throw new CliException("RFC 4648 Base16 does not use padding; select --padding omit.");
+            }
+
+            codec = AnyBase.CreateRfc4648Base16();
+            return true;
+        }
+
+        if (name.Equals("rfc-base32", StringComparison.OrdinalIgnoreCase))
+        {
+            codec = AnyBase.CreateRfc4648Base32(usePadding);
+            return true;
+        }
+
+        if (name.Equals("rfc-base64", StringComparison.OrdinalIgnoreCase))
+        {
+            codec = AnyBase.CreateRfc4648Base64(usePadding);
+            return true;
+        }
+
+        if (name.Equals("rfc-base64url", StringComparison.OrdinalIgnoreCase))
+        {
+            codec = AnyBase.CreateRfc4648Base64Url(usePadding);
+            return true;
+        }
+
+        throw new CliException(
+            $"Unknown RFC preset '{name}'. Use rfc-base16, rfc-base32, rfc-base64, or rfc-base64url.");
+    }
+
+    private static bool IsHistoricalStandardPreset(string name)
+    {
+        return name.Equals("hex", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("base32", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("base64", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("base64url", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ValidateAlphabet(string alphabet, string? separator)
@@ -483,10 +611,13 @@ public static class CliApplication
               -o, --output <file|->       Write to a file or stdout.
                   --input-format <format> text, binary, or hex (default: text).
                   --output-format <format> text, binary, or hex (default: text).
+                  --mode <fixed|packed>   Byte-wise compatibility or packed bit stream.
+                  --padding <include|omit> Configure packed trailing '=' padding.
               -h, --help                  Show command help.
 
             Binary output is written byte-for-byte without a trailing newline.
-            Presets: binary, octal, decimal, hex, base32, base64, base64url.
+            Fixed presets: binary, octal, decimal, hex, base32, base64, base64url.
+            Packed RFC presets: rfc-base16, rfc-base32, rfc-base64, rfc-base64url.
             """;
     }
 
@@ -504,9 +635,13 @@ public static class CliApplication
           anybase encode --input photo.bin --input-format binary --output encoded.txt
           anybase decode --input encoded.txt --output photo.bin --output-format binary
           anybase encode "41 42" --input-format hex --output-format binary
+          anybase encode "foobar" --mode packed --alphabet rfc-base64
+          anybase encode "foobar" --mode packed --alphabet rfc-base32 --padding omit
 
         Formats: text, binary, hex.
-        Alphabet presets: binary, octal, decimal, hex, base32, base64, base64url.
+        Default mode: fixed (compatible with AnyBase.Net 1.0-1.3).
+        Fixed presets: binary, octal, decimal, hex, base32, base64, base64url.
+        Packed RFC presets: rfc-base16, rfc-base32, rfc-base64, rfc-base64url.
 
         Run 'anybase <command> --help' for command options.
         """;
@@ -528,6 +663,8 @@ public static class CliApplication
         string? Separator,
         DataFormat InputFormat,
         DataFormat OutputFormat,
+        EncodingMode Mode,
+        bool? UsePadding,
         bool HelpRequested);
 
     private sealed class StreamHandle : IAsyncDisposable
